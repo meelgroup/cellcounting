@@ -8,6 +8,7 @@ import Cellcounting.Model.Run
 import Cellcounting.Analysis.TapeWindow
 import Cellcounting.Analysis.PhaseWindow
 import Cellcounting.Analysis.RepeatRunsTapeFalse
+import Cellcounting.Analysis.FlipsReadBound
 
 /-!
 # The program and the model are the same algorithm
@@ -33,7 +34,13 @@ hypothesis on `F` (`Analysis/RepeatRunsTapeFalse.lean`).  The repaired statement
 is `repeatRuns_tape_of_window`.
 
 `annealRun_tape` is proved from `phase_tape`.  `repeatRuns_tape_of_window` is
-proved outright.  Every other rung is still `sorry`.
+proved outright.  `output_eq_fpras` is proved from `output_eq_map_estimate`,
+`estimate_feasible_law`, `estimate_infeasible` and `feasible_val`, together with the
+input round-trip (`readList_val`, `readMatrix_val`, `decode_input`) and the uniform
+bound on fair bits read (`Analysis.flipsRead_bddAbove`, `Analysis/FlipsReadBound.lean`),
+which makes `tapeLength` cover every execution.  `binOffsets_tape` is proved from
+`dyadicDraw_tape` and `Analysis.dyadicDraw_window`, by induction over the free cells.
+Every other rung is still `sorry`.
 -/
 
 set_option autoImplicit false
@@ -70,7 +77,138 @@ theorem ratioAvg_tape (I : Cellcounting.Instance) (ε δ : ℚ) (C : Cellcountin
 
 /-- The program's draw of offsets within a bin, together with its weight, has the pseudocode law. -/
 theorem binOffsets_tape (I : Cellcounting.Instance) (ε δ : ℚ) (C : Cellcounting.Program.Ctx) (hC : (C.m, C.n, C.rows.map Cellcounting.Model.Operations.SNat.get, C.cols.map Cellcounting.Model.Operations.SNat.get, C.small.map (fun (e : Cellcounting.Program.Entry) => (e.1, e.2.1, e.2.2.get)), C.nSmall, C.free.map (fun (e : Cellcounting.Program.Entry) => (e.1, e.2.1, e.2.2.get)), C.nFree, C.tree.map (fun (e : Cellcounting.Program.Entry) => (e.1, e.2.1, e.2.2.get)), C.nTree, C.order, C.roots, C.Mf.get, C.d.get, C.B.get, C.H.get, C.Aq.get, C.Hq.get, C.Bq.get) = (I.m, I.n, (List.range I.m).map (Cellcounting.Pseudocode.tRow I), (List.range I.n).map (Cellcounting.Pseudocode.tCol I), Cellcounting.Pseudocode.smallCells I ε δ, Cellcounting.Pseudocode.nSmall I ε δ, (Cellcounting.Pseudocode.forest I ε δ).free, Cellcounting.Pseudocode.nFree I ε δ, (Cellcounting.Pseudocode.forest I ε δ).tree, (Cellcounting.Pseudocode.forest I ε δ).tree.length, Cellcounting.Pseudocode.elimOrder I ε δ, Cellcounting.Pseudocode.roots I ε δ, Cellcounting.Pseudocode.Mf I ε δ, Cellcounting.Pseudocode.dParam I, Cellcounting.Pseudocode.BParam I ε δ, Cellcounting.Pseudocode.HParam I ε δ, (Cellcounting.Pseudocode.AParam I ε δ : ℚ), (Cellcounting.Pseudocode.HParam I ε δ : ℚ), (Cellcounting.Pseudocode.BParam I ε δ : ℚ))) (ξin θ : Cellcounting.Model.Operations.SRat) (v : List Cellcounting.Model.Operations.SNat) (cur n T : ℕ) (hT : ∀ s : Finset ℕ, (Cellcounting.Program.binOffsets C (Cellcounting.Program.oracleParams C ξin θ).val (Arlib.Computation.Coins.ofFinset s) v cur).val.2.2 + n ≤ T) : (Cellcounting.tapeHeads T).map (fun (s : Finset ℕ) => let r := (Cellcounting.Program.binOffsets C (Cellcounting.Program.oracleParams C ξin θ).val (Arlib.Computation.Coins.ofFinset s) v cur).val; (((fun (k : ℕ) => (r.1.getD k default).get), r.2.1.get), ((s.filter (fun i => r.2.2 ≤ i)).image (fun i => i - r.2.2)).filter (fun i => i < n))) = (Cellcounting.Pseudocode.binOffsets I ε δ ξin.get θ.get (fun k => (v.getD k default).get)).bind (fun z => (Cellcounting.tapeHeads n).map (fun s' => (z, s'))) := by
-  sorry
+  simp only [Prod.mk.injEq] at hC
+  obtain ⟨-, -, -, -, -, -, hfree, hnF, -, -, -, -, -, hd, hB, hH, -, -, -⟩ := hC
+  -- the offset-draw tolerance
+  have hζ : (Program.oracleParams C ξin θ).val.ζ.get = Pseudocode.oZeta I ε δ ξin.get θ.get := by
+    show θ.get / (8 * (((C.d.get + 1) * (C.H.get + 1) *
+      ⌈1000000 * ((C.H.get + 1 : ℕ) : ℚ) / (θ.get * ((ξin.get / (50 * ((C.H.get + 1 : ℕ) : ℚ))) *
+        (ξin.get / (50 * ((C.H.get + 1 : ℕ) : ℚ)))))⌉₊ : ℕ) : ℚ)) = _
+    rw [hd, hH]
+    simp only [Pseudocode.oZeta, Pseudocode.oQ, Pseudocode.oN, Pseudocode.oSigma, sq]
+    push_cast
+    ring_nf
+  -- the free-cell bound read by the program is the pseudocode's
+  have hfreeAt : ∀ k, (Pseudocode.freeAt I ε δ k).2.2 = (C.free.getD k default).2.2.get := by
+    intro k
+    unfold Pseudocode.freeAt
+    rw [← hfree]
+    rw [List.getD_eq_getElem?_getD, List.getD_eq_getElem?_getD, List.getElem?_map]
+    cases C.free[k]? <;> rfl
+  -- one round of the program loop, as a function of the tape
+  let P := (Program.oracleParams C ξin θ).val
+  let one := (Model.Operations.SNat.lit 1).val
+  let step : ℕ → List Model.Operations.SRat × Model.Operations.SNat × ℕ → Finset ℕ →
+      List Model.Operations.SRat × Model.Operations.SNat × ℕ := fun k st s =>
+    let e := C.free.getD k default
+    let ve := v.getD k default
+    let b1 := (Model.Operations.SNat.add e.2.2 one).val
+    let lo := (Program.ceilDivN (Model.Operations.SNat.mul b1 ve).val C.B).val
+    let hi := (Program.ceilDivN (Model.Operations.SNat.mul b1 (Model.Operations.SNat.add ve one).val).val C.B).val
+    let len := (Model.Operations.SNat.sub hi lo).val
+    let r := (Program.dyadicDraw (Arlib.Computation.Coins.ofFinset s) len P.ζ st.2.2).val
+    (st.1 ++ [(Model.Operations.SNat.toRat (Model.Operations.SNat.add lo r.1).val).val],
+      (Model.Operations.SNat.mul st.2.1 len).val, r.2)
+  let init : List Model.Operations.SRat × Model.Operations.SNat × ℕ := ([], one, cur)
+  let g : ℕ → Finset ℕ → List Model.Operations.SRat × Model.Operations.SNat × ℕ := fun k s =>
+    (List.range k).foldl (fun st i => step i st s) init
+  have hg : ∀ s, (Program.binOffsets C P (Arlib.Computation.Coins.ofFinset s) v cur).val = g C.nFree s := by
+    intro s
+    show (Arlib.Computation.Charged.repeatFor _ C.nFree init).val = _
+    rw [Analysis.val_repeatFor']
+    rfl
+  let π : List Model.Operations.SRat × Model.Operations.SNat × ℕ → ℕ := fun r => r.2.2
+  let view : List Model.Operations.SRat × Model.Operations.SNat × ℕ → (ℕ → ℚ) × ℕ := fun r =>
+    (fun k => (r.1.getD k default).get, r.2.1.get)
+  let F : ℕ → (ℕ → ℚ) × ℕ → PMF ((ℕ → ℚ) × ℕ) := fun k st =>
+    let b1 := (Pseudocode.freeAt I ε δ k).2.2 + 1
+    let lo := (b1 * (fun k => (v.getD k default).get) k) ⌈/⌉ Pseudocode.BParam I ε δ
+    let hi := (b1 * ((fun k => (v.getD k default).get) k + 1)) ⌈/⌉ Pseudocode.BParam I ε δ
+    (Pseudocode.dyadicDraw (hi - lo) (Pseudocode.oZeta I ε δ ξin.get θ.get)).map fun off =>
+      (Function.update st.1 k ((lo + off : ℕ) : ℚ), st.2 * (hi - lo))
+  -- appending to a list of length `k` updates its view at `k`
+  have hpush : ∀ (l : List Model.Operations.SRat) (a : Model.Operations.SRat) (k : ℕ), l.length = k →
+      (fun k' => ((l ++ [a]).getD k' default).get) =
+        Function.update (fun k' => (l.getD k' default).get) k a.get := by
+    intro l a k hl
+    funext k'
+    rw [Function.update_apply, List.getD_eq_getElem?_getD, List.getD_eq_getElem?_getD]
+    rcases lt_trichotomy k' k with h | h | h
+    · rw [if_neg (by omega), List.getElem?_append_left (by omega)]
+    · subst h
+      rw [if_pos rfl, List.getElem?_append_right (by omega), hl, Nat.sub_self]
+      rfl
+    · have h1 : (l ++ [a])[k']? = none := List.getElem?_eq_none (by simp; omega)
+      have h2 : l[k']? = none := List.getElem?_eq_none (by omega)
+      rw [if_neg (by omega), h1, h2]
+  -- one round: windowed, with the pseudocode round law
+  have hstep : ∀ k x, x.1.length = k →
+      Analysis.Window x.2.2 π (step k x) ∧ Analysis.TapeLaw π view (step k x) (F k (view x)) := by
+    intro k x hx
+    let e := C.free.getD k default
+    let ve := v.getD k default
+    let b1 := (Model.Operations.SNat.add e.2.2 one).val
+    let lo := (Program.ceilDivN (Model.Operations.SNat.mul b1 ve).val C.B).val
+    let hi := (Program.ceilDivN (Model.Operations.SNat.mul b1 (Model.Operations.SNat.add ve one).val).val C.B).val
+    let len := (Model.Operations.SNat.sub hi lo).val
+    let post : Model.Operations.SNat × ℕ → List Model.Operations.SRat × Model.Operations.SNat × ℕ := fun r =>
+      (x.1 ++ [(Model.Operations.SNat.toRat (Model.Operations.SNat.add lo r.1).val).val],
+        (Model.Operations.SNat.mul x.2.1 len).val, r.2)
+    have hdd : Analysis.TapeLaw Prod.snd (fun r : Model.Operations.SNat × ℕ => r.1.get)
+        (fun s => (Program.dyadicDraw (Arlib.Computation.Coins.ofFinset s) len P.ζ x.2.2).val)
+        (Pseudocode.dyadicDraw len.get P.ζ.get) :=
+      fun n T hT => dyadicDraw_tape len P.ζ x.2.2 n T hT
+    have hlo : lo.get = ((Pseudocode.freeAt I ε δ k).2.2 + 1) * (v.getD k default).get ⌈/⌉
+        Pseudocode.BParam I ε δ := by
+      show ((e.2.2.get + 1) * ve.get + C.B.get - 1) / C.B.get = _
+      rw [hfreeAt, hB]; rfl
+    have hhi : hi.get = ((Pseudocode.freeAt I ε δ k).2.2 + 1) * ((v.getD k default).get + 1) ⌈/⌉
+        Pseudocode.BParam I ε δ := by
+      show ((e.2.2.get + 1) * (ve.get + 1) + C.B.get - 1) / C.B.get = _
+      rw [hfreeAt, hB]; rfl
+    have hlen : len.get = hi.get - lo.get := rfl
+    refine ⟨Analysis.window_map post (fun _ => rfl) (Analysis.dyadicDraw_window len P.ζ x.2.2), ?_⟩
+    have hF : F k (view x) = (Pseudocode.dyadicDraw len.get P.ζ.get).map fun off =>
+        (Function.update (view x).1 k ((lo.get + off : ℕ) : ℚ), (view x).2 * len.get) := by
+      rw [hζ, hlen, hlo, hhi]
+    rw [hF]
+    exact Analysis.tapeLaw_map post _ (fun _ => rfl) (fun r => by
+      simp only [view, post]
+      rw [hpush _ _ k hx]
+      rfl) hdd
+  have key : ∀ k, Analysis.Window cur π (g k) ∧
+      Analysis.TapeLaw π view (g k) (Pseudocode.loop F k (view init)) ∧ ∀ s, (g k s).1.length = k := by
+    intro k
+    induction k with
+    | zero =>
+      exact ⟨Analysis.window_const init le_rfl, Analysis.tapeLaw_const π view init, fun _ => rfl⟩
+    | succ k ih =>
+      obtain ⟨hw, hl, hlen⟩ := ih
+      have hgf : g (k + 1) = fun s => step k (g k s) s := by
+        funext s
+        simp only [g, List.range_succ, List.foldl_append, List.foldl_cons, List.foldl_nil]
+      have hloop : Pseudocode.loop F (k + 1) (view init) = (Pseudocode.loop F k (view init)).bind (F k) := by
+        unfold Pseudocode.loop
+        rw [List.range_succ, List.foldlM_append]
+        simp only [List.foldlM_cons, List.foldlM_nil]
+        show (List.foldlM (fun b i => F i b) (view init) (List.range k)).bind
+          (fun b => (F k b).bind PMF.pure) = _
+        simp only [PMF.bind_pure]
+      rw [hgf, hloop]
+      refine ⟨Analysis.window_bind (g₂ := fun x s => step k x s) (fun x => x.1.length = k) hw hlen
+          (fun x hx => (hstep k x hx).1),
+        Analysis.tapeLaw_bind (g₂ := fun x s => step k x s) (G₂ := F k) (fun x => x.1.length = k) hw hlen
+          (fun x hx => (hstep k x hx).1) hl (fun x hx => (hstep k x hx).2), fun s => ?_⟩
+      simp only [step, List.length_append, List.length_singleton, hlen s]
+  have hinit : view init = (fun _ => 0, 1) := rfl
+  have hpseudo : Pseudocode.binOffsets I ε δ ξin.get θ.get (fun k => (v.getD k default).get) =
+      Pseudocode.loop F C.nFree (view init) := by
+    rw [hinit, hnF]
+    rfl
+  rw [hpseudo]
+  have := (key C.nFree).2.1 n T (fun s => by rw [← hg]; exact hT s)
+  simp only [← hg] at this
+  exact this
 
 /-- The correction-factor average inside the weight evaluator has the same law in the program as in the pseudocode. -/
 theorem corrAvg_tape (I : Cellcounting.Instance) (ε δ : ℚ) (C : Cellcounting.Program.Ctx) (hC : (C.m, C.n, C.rows.map Cellcounting.Model.Operations.SNat.get, C.cols.map Cellcounting.Model.Operations.SNat.get, C.small.map (fun (e : Cellcounting.Program.Entry) => (e.1, e.2.1, e.2.2.get)), C.nSmall, C.free.map (fun (e : Cellcounting.Program.Entry) => (e.1, e.2.1, e.2.2.get)), C.nFree, C.tree.map (fun (e : Cellcounting.Program.Entry) => (e.1, e.2.1, e.2.2.get)), C.nTree, C.order, C.roots, C.Mf.get, C.d.get, C.B.get, C.H.get, C.Aq.get, C.Hq.get, C.Bq.get) = (I.m, I.n, (List.range I.m).map (Cellcounting.Pseudocode.tRow I), (List.range I.n).map (Cellcounting.Pseudocode.tCol I), Cellcounting.Pseudocode.smallCells I ε δ, Cellcounting.Pseudocode.nSmall I ε δ, (Cellcounting.Pseudocode.forest I ε δ).free, Cellcounting.Pseudocode.nFree I ε δ, (Cellcounting.Pseudocode.forest I ε δ).tree, (Cellcounting.Pseudocode.forest I ε δ).tree.length, Cellcounting.Pseudocode.elimOrder I ε δ, Cellcounting.Pseudocode.roots I ε δ, Cellcounting.Pseudocode.Mf I ε δ, Cellcounting.Pseudocode.dParam I, Cellcounting.Pseudocode.BParam I ε δ, Cellcounting.Pseudocode.HParam I ε δ, (Cellcounting.Pseudocode.AParam I ε δ : ℚ), (Cellcounting.Pseudocode.HParam I ε δ : ℚ), (Cellcounting.Pseudocode.BParam I ε δ : ℚ))) (ξin θ : Cellcounting.Model.Operations.SRat) (x y : List Cellcounting.Model.Operations.SNat) (j cur n T : ℕ) (hT : ∀ s : Finset ℕ, (Cellcounting.Program.corrAvg C (Cellcounting.Program.oracleParams C ξin θ).val (Arlib.Computation.Coins.ofFinset s) x y j cur).val.2 + n ≤ T) : (Cellcounting.tapeHeads T).map (fun (s : Finset ℕ) => let r := (Cellcounting.Program.corrAvg C (Cellcounting.Program.oracleParams C ξin θ).val (Arlib.Computation.Coins.ofFinset s) x y j cur).val; (r.1.get, ((s.filter (fun i => r.2 ≤ i)).image (fun i => i - r.2)).filter (fun i => i < n))) = (Cellcounting.Pseudocode.corrAvg I ε δ ξin.get θ.get j (fun k => (x.getD k default).get) (fun k => (y.getD k default).get)).bind (fun z => (Cellcounting.tapeHeads n).map (fun s' => (z, s'))) := by
@@ -362,14 +500,87 @@ theorem estimate_infeasible (I : Cellcounting.Instance) (ε δ : ℚ) (h : ¬ Ce
 theorem estimate_feasible_law (I : Cellcounting.Instance) (ε δ : ℚ) (hfeas : Cellcounting.Pseudocode.feasible I) (T : ℕ) (hT : ∀ s : Finset ℕ, Cellcounting.Interface.flipsRead I ε δ s ≤ T) : (Cellcounting.tapeHeads T).map (fun (s : Finset ℕ) => Cellcounting.Interface.estimate I ε δ (Arlib.Computation.Coins.ofFinset s)) = Cellcounting.Pseudocode.fpras I ε δ := by
   sorry
 
+/-- INTERNAL: the program's input reader stores each number as its literal. Used to show
+that the instance `feasible_val` reconstructs from the encoded input is `I` itself. -/
+theorem readList_val (l : List ℕ) :
+    (Program.readList l).val = l.map (fun k => (Model.Operations.SNat.lit k).val) := by
+  unfold Program.readList
+  rw [Analysis.val_foldl']
+  have h : ∀ (l : List ℕ) (acc : List Model.Operations.SNat), l.foldl (fun b a => (do
+      let x ← Model.Operations.SNat.lit a
+      Model.Operations.push b x : Program.Prog (List Model.Operations.SNat)).val) acc =
+      acc ++ l.map (fun k => (Model.Operations.SNat.lit k).val) := by
+    intro l
+    induction l with
+    | nil => intro acc; simp
+    | cons a l ih => intro acc; rw [List.foldl_cons, ih]; simp
+  simpa using h l []
+
+/-- INTERNAL: the matrix reader stores each row as its list of literals. -/
+theorem readMatrix_val (rows : List (List ℕ)) :
+    (Program.readMatrix rows).val =
+      rows.map (fun row => row.map (fun k => (Model.Operations.SNat.lit k).val)) := by
+  unfold Program.readMatrix
+  rw [Analysis.val_foldl']
+  have h : ∀ (l : List (List ℕ)) (acc : List (List Model.Operations.SNat)), l.foldl
+      (fun b a => (do
+        let xs ← Program.readList a
+        Model.Operations.push b xs : Program.Prog (List (List Model.Operations.SNat))).val) acc =
+      acc ++ l.map (fun row => row.map (fun k => (Model.Operations.SNat.lit k).val)) := by
+    intro l
+    induction l with
+    | nil => intro acc; simp
+    | cons a l ih => intro acc; rw [List.foldl_cons, ih]; simp [← readList_val]
+  simpa using h rows []
+
+/-- INTERNAL: reading back entry `i` of an encoded vector gives its `i`-th component. -/
+theorem readList_ofFn_getD {k : ℕ} (f : Fin k → ℕ) (i : Fin k) :
+    ((Program.readList (List.ofFn f)).val.getD i.val default).get = f i := by
+  rw [readList_val, List.getD_eq_getElem?_getD, List.getElem?_map, List.getElem?_ofFn,
+    dif_pos i.isLt]
+  simp
+
+/-- INTERNAL: the instance `feasible_val` rebuilds from the encoded input of `I` is `I`. -/
+theorem decode_input (I : Instance) :
+    (⟨I.m, I.n,
+      fun i => ((Program.readList (List.ofFn I.r)).val.getD i.val default).get,
+      fun j => ((Program.readList (List.ofFn I.c)).val.getD j.val default).get,
+      fun i j => (((Program.readMatrix (List.ofFn fun i => List.ofFn fun j => I.b i j)).val.getD
+        i.val []).getD j.val default).get⟩ : Instance) = I := by
+  obtain ⟨m, n, r, c, b⟩ := I
+  have hb : ∀ (i : Fin m) (j : Fin n), (((Program.readMatrix (List.ofFn fun i => List.ofFn fun j =>
+      b i j)).val.getD i.val []).getD j.val default).get = b i j := by
+    intro i j
+    rw [readMatrix_val, List.getD_eq_getElem?_getD (l := List.map _ _), List.getElem?_map,
+      List.getElem?_ofFn, dif_pos i.isLt]
+    simp only [Option.map_some, Option.getD_some]
+    rw [← readList_val]
+    exact readList_ofFn_getD (fun j => b i j) j
+  simp only [readList_ofFn_getD, hb]
+
 /-- The bridge: the output law of the implemented program, run through Program.feasible on the encoded input and then the pipeline, is exactly the pseudocode fpras law, and the program's feasibility gate decides the pseudocode predicate. The analysis rewrites through the first conjunct. The second conjunct comes from feasible_val once readList/readMatrix are shown to round-trip. -/
 theorem output_eq_fpras (I : Cellcounting.Instance) (ε δ : ℚ) : Cellcounting.output I ε δ = Cellcounting.Pseudocode.fpras I ε δ ∧ (Cellcounting.Program.feasible I.m I.n (Cellcounting.Program.readList (List.ofFn I.r)).val (Cellcounting.Program.readList (List.ofFn I.c)).val (Cellcounting.Program.readMatrix (List.ofFn fun i => List.ofFn fun j => I.b i j)).val).val = decide (Cellcounting.Pseudocode.feasible I) := by
-  sorry
+  refine ⟨?_, ?_⟩
+  · rw [output_eq_map_estimate]
+    by_cases hfeas : Pseudocode.feasible I
+    · refine estimate_feasible_law I ε δ hfeas _ fun s => ?_
+      rw [Interface.tapeLength_eq]
+      exact le_csSup (Analysis.flipsRead_bddAbove I ε δ) (Set.mem_range_self s)
+    · have h0 : (fun s : Finset ℕ => Interface.estimate I ε δ (Arlib.Computation.Coins.ofFinset s)) =
+          Function.const _ 0 := funext fun s => estimate_infeasible I ε δ hfeas _
+      rw [h0, PMF.map_const, Pseudocode.fpras, if_neg hfeas]
+  · have h := feasible_val I.m I.n (Program.readList (List.ofFn I.r)).val
+      (Program.readList (List.ofFn I.c)).val
+      (Program.readMatrix (List.ofFn fun i => List.ofFn fun j => I.b i j)).val
+      (by simp [readList_val]) (by simp [readList_val])
+    rw [h, decode_input]
 
 end Cellcounting
 
 /-! ### Run record
 Newest first. History, not instruction — what this file claims is above.
 
+* r3 · proved · `binOffsets_tape` from `dyadicDraw_tape` (per-cell law via `tapeLaw_map`, rounds via `tapeLaw_bind`); `hC` supplies `free`, `nFree`, `d`, `B`, `H`
+* r2 · assembled · `output_eq_fpras` from its four sibling rungs; tape-length attainment by `Analysis.flipsRead_bddAbove` (finite range over tapes), input round-trip proved here
 * r1 · proved · `annealRun_tape` from `phase_tape`, `phase_window` and the `p × p` shape invariant; `repeatRuns_tape` disproved by `Analysis.repeatRuns_tape_false`, repaired form `repeatRuns_tape_of_window` proved
 -/
