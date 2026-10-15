@@ -12,6 +12,7 @@ import Cellcounting.Analysis.FlipsReadBound
 import Cellcounting.Analysis.BuildCtxView
 import Cellcounting.Analysis.ChainSetupView
 import Cellcounting.Analysis.UniformBitsTape
+import Cellcounting.Analysis.CursorFlips
 
 /-!
 # The program and the model are the same algorithm
@@ -52,6 +53,15 @@ steps before and after its single `uniformBits` call are tape-free, and its expo
 `pow2Approx_val`, by induction over the `N_in` rounds; it uses that a program bin sample
 has at most `C.nFree` coordinates (`sampleBin_val_length_le`), so that its cube point has
 the pseudocode `binPoint` as view (`binPoint_val_view`).
+`estimate_feasible_law` is proved from `repeatRuns_tape_of_window` (through
+`median_tape_law`), `zeroRun_tape`, `annealRun_tape`, the run windows of
+`Analysis/PhaseWindow.lean`, `buildCtx_view`, `params_view`, `chainSetup_view`,
+`feasible_val` and `orderStat_val`.  Its hypothesis bounds the fair bits *paid for*
+(`flipsRead`), while the tape lemmas need the final *cursor*; `Analysis/CursorFlips.lean`
+proves the cursor never runs ahead of the flips paid for (`Analysis.CurLe`), and
+`cost_flip_bind_right`/`_left` place the runs' flips inside those of `Program.fpras`.
+`output_eq_map_estimate` is the definition of `output` with its maps composed.
+`estimate_infeasible` is the infeasible branch of `Program.fpras`, read through `feasible_val`.
 Every other rung is still `sorry`.
 -/
 
@@ -784,18 +794,6 @@ theorem buildCtx_view (I : Cellcounting.Instance) (ε δ : ℚ) (hfeas : Cellcou
 theorem chainSetup_view (I : Cellcounting.Instance) (ε δ : ℚ) (C : Cellcounting.Program.Ctx) (hC : (C.m, C.n, C.rows.map Cellcounting.Model.Operations.SNat.get, C.cols.map Cellcounting.Model.Operations.SNat.get, C.small.map (fun (e : Cellcounting.Program.Entry) => (e.1, e.2.1, e.2.2.get)), C.nSmall, C.free.map (fun (e : Cellcounting.Program.Entry) => (e.1, e.2.1, e.2.2.get)), C.nFree, C.tree.map (fun (e : Cellcounting.Program.Entry) => (e.1, e.2.1, e.2.2.get)), C.nTree, C.order, C.roots, C.Mf.get, C.d.get, C.B.get, C.H.get, C.Aq.get, C.Hq.get, C.Bq.get) = (I.m, I.n, (List.range I.m).map (Cellcounting.Pseudocode.tRow I), (List.range I.n).map (Cellcounting.Pseudocode.tCol I), Cellcounting.Pseudocode.smallCells I ε δ, Cellcounting.Pseudocode.nSmall I ε δ, (Cellcounting.Pseudocode.forest I ε δ).free, Cellcounting.Pseudocode.nFree I ε δ, (Cellcounting.Pseudocode.forest I ε δ).tree, (Cellcounting.Pseudocode.forest I ε δ).tree.length, Cellcounting.Pseudocode.elimOrder I ε δ, Cellcounting.Pseudocode.roots I ε δ, Cellcounting.Pseudocode.Mf I ε δ, Cellcounting.Pseudocode.dParam I, Cellcounting.Pseudocode.BParam I ε δ, Cellcounting.Pseudocode.HParam I ε δ, (Cellcounting.Pseudocode.AParam I ε δ : ℚ), (Cellcounting.Pseudocode.HParam I ε δ : ℚ), (Cellcounting.Pseudocode.BParam I ε δ : ℚ))) (Pm : Cellcounting.Program.Params) (hPm : (Pm.d.get, Pm.K.get, Pm.A.get, Pm.B.get, Pm.W.get, Pm.H.get) = (Cellcounting.Pseudocode.dParam I, Cellcounting.Pseudocode.KParam I ε δ, Cellcounting.Pseudocode.AParam I ε δ, Cellcounting.Pseudocode.BParam I ε δ, Cellcounting.Pseudocode.WParam I ε δ, Cellcounting.Pseudocode.HParam I ε δ)) (pS : Cellcounting.Model.Operations.SNat) (hp : pS.get = Cellcounting.Pseudocode.pSmall I ε δ) (εS : Cellcounting.Model.Operations.SRat) (hε : εS.get = ε) : let r := (Cellcounting.Program.chainSetup C Pm pS εS).val; ((r.1.p, r.1.pS.get, r.1.nsm, r.1.pairCell, r.1.cellFirst, r.1.smallB.map Cellcounting.Model.Operations.SNat.get, r.1.ξ.get, r.1.kAcc, r.1.kAccS.get), (r.2.1.τ.get, r.2.1.Bret.get, r.2.1.BretN, r.2.1.Nav.get, r.2.1.NavN, r.2.1.Hn), (fun (i l : ℕ) => ((r.2.2.1.getD i []).getD l default).get), (r.2.2.1.length, r.2.2.1.map List.length), r.2.2.2.get) = ((Cellcounting.Pseudocode.pSmall I ε δ, Cellcounting.Pseudocode.pSmall I ε δ, Cellcounting.Pseudocode.nSmall I ε δ, Cellcounting.Pseudocode.pairCells I ε δ, (List.range (Cellcounting.Pseudocode.nSmall I ε δ)).map (Cellcounting.Pseudocode.cellFirst I ε δ), (List.range (Cellcounting.Pseudocode.nSmall I ε δ)).map (Cellcounting.Pseudocode.smallB I ε δ), Cellcounting.Pseudocode.ξParam I ε δ, Cellcounting.Pseudocode.kAccParam I ε δ, Cellcounting.Pseudocode.kAccParam I ε δ), (Cellcounting.Pseudocode.τParam I ε δ, Cellcounting.Pseudocode.BretParam I ε δ, Cellcounting.Pseudocode.BretParam I ε δ, Cellcounting.Pseudocode.NavParam I ε δ, Cellcounting.Pseudocode.NavParam I ε δ, Cellcounting.Pseudocode.HParam I ε δ), Cellcounting.Pseudocode.w0 I ε δ, (Cellcounting.Pseudocode.pSmall I ε δ, List.replicate (Cellcounting.Pseudocode.pSmall I ε δ) (Cellcounting.Pseudocode.pSmall I ε δ)), Cellcounting.Pseudocode.C0 I ε δ) := by
   exact Analysis.chainSetup_view_of I ε δ C hC Pm hPm pS hp εS hε
 
-/-- Unfolds the output law in Model/Run: it is the pushforward of a uniform finite coin tape through the program's estimate. -/
-theorem output_eq_map_estimate (I : Cellcounting.Instance) (ε δ : ℚ) : Cellcounting.output I ε δ = (Cellcounting.tapeHeads (Cellcounting.tapeLength I ε δ)).map (fun (s : Finset ℕ) => Cellcounting.Interface.estimate I ε δ (Arlib.Computation.Coins.ofFinset s)) := by
-  sorry
-
-/-- On infeasible input the program returns zero for every coin sequence. This is the theorem's 'zero on every execution' clause. -/
-theorem estimate_infeasible (I : Cellcounting.Instance) (ε δ : ℚ) (h : ¬ Cellcounting.Pseudocode.feasible I) (c : Arlib.Computation.Coins ℕ) : Cellcounting.Interface.estimate I ε δ c = 0 := by
-  sorry
-
-/-- On feasible input, the law of the program's estimate on any tape long enough to cover every read equals the pseudocode fpras law. It splits on p = 0 versus p ≥ 1. -/
-theorem estimate_feasible_law (I : Cellcounting.Instance) (ε δ : ℚ) (hfeas : Cellcounting.Pseudocode.feasible I) (T : ℕ) (hT : ∀ s : Finset ℕ, Cellcounting.Interface.flipsRead I ε δ s ≤ T) : (Cellcounting.tapeHeads T).map (fun (s : Finset ℕ) => Cellcounting.Interface.estimate I ε δ (Arlib.Computation.Coins.ofFinset s)) = Cellcounting.Pseudocode.fpras I ε δ := by
-  sorry
-
 /-- INTERNAL: the program's input reader stores each number as its literal. Used to show
 that the instance `feasible_val` reconstructs from the encoded input is `I` itself. -/
 theorem readList_val (l : List ℕ) :
@@ -854,6 +852,158 @@ theorem decode_input (I : Instance) :
     exact readList_ofFn_getD (fun j => b i j) j
   simp only [readList_ofFn_getD, hb]
 
+/-- Unfolds the output law in Model/Run: it is the pushforward of a uniform finite coin tape through the program's estimate. -/
+theorem output_eq_map_estimate (I : Cellcounting.Instance) (ε δ : ℚ) : Cellcounting.output I ε δ = (Cellcounting.tapeHeads (Cellcounting.tapeLength I ε δ)).map (fun (s : Finset ℕ) => Cellcounting.Interface.estimate I ε δ (Arlib.Computation.Coins.ofFinset s)) := by
+  unfold output run tape
+  rw [PMF.map_comp, PMF.map_comp]
+  rfl
+
+/-- On infeasible input the program returns zero for every coin sequence. This is the theorem's 'zero on every execution' clause. -/
+theorem estimate_infeasible (I : Cellcounting.Instance) (ε δ : ℚ) (h : ¬ Cellcounting.Pseudocode.feasible I) (c : Arlib.Computation.Coins ℕ) : Cellcounting.Interface.estimate I ε δ c = 0 := by
+  have hf := feasible_val I.m I.n (Program.readList (List.ofFn I.r)).val
+      (Program.readList (List.ofFn I.c)).val
+      (Program.readMatrix (List.ofFn fun i => List.ofFn fun j => I.b i j)).val
+      (by simp [readList_val]) (by simp [readList_val])
+  rw [decode_input, decide_eq_false h] at hf
+  simp only [Interface.estimate, Program.fpras, Arlib.Computation.Charged.val_bind, hf,
+    Bool.false_eq_true, ↓reduceIte, Interface.SRat.val_output, Interface.SRat.get_lit]
+
+open Arlib.Computation in
+/-- INTERNAL: the median of `R` windowed runs read from cursor `0`, on any tape that covers
+their final cursor, has the law of the pseudocode median of `R` independent single runs.
+Assembled from `repeatRuns_tape_of_window`. TEXLINE: sections/algorithm.tex:670-690 -/
+theorem median_tape_law (F : Arlib.Computation.Coins ℕ → ℕ → Cellcounting.Program.Prog (Cellcounting.Model.Operations.SRat × ℕ)) (G : PMF ℚ) (hF : ∀ cur n T : ℕ, (∀ s : Finset ℕ, (F (Arlib.Computation.Coins.ofFinset s) cur).val.2 + n ≤ T) → (Cellcounting.tapeHeads T).map (fun (s : Finset ℕ) => let r := (F (Arlib.Computation.Coins.ofFinset s) cur).val; (r.1.get, ((s.filter (fun i => r.2 ≤ i)).image (fun i => i - r.2)).filter (fun i => i < n))) = G.bind (fun z => (Cellcounting.tapeHeads n).map (fun s' => (z, s')))) (hW : ∀ cur : ℕ, Cellcounting.Analysis.Window cur Prod.snd (fun s : Finset ℕ => (F (Arlib.Computation.Coins.ofFinset s) cur).val))
+    (R mid T : ℕ) (est : Finset ℕ → ℚ)
+    (hest : ∀ s, est s = Pseudocode.orderStat (((Arlib.Computation.Charged.repeatFor (fun _ (st : List Cellcounting.Model.Operations.SRat × ℕ) => ((do let (z, c') ← F (Arlib.Computation.Coins.ofFinset s) st.2; let outs ← Cellcounting.Model.Operations.push st.1 z; pure (outs, c')) : Cellcounting.Program.Prog (List Cellcounting.Model.Operations.SRat × ℕ))) R ([], 0)).val.1).map Model.Operations.SRat.get) mid)
+    (hcur : ∀ s, (Arlib.Computation.Charged.repeatFor (fun _ (st : List Cellcounting.Model.Operations.SRat × ℕ) => ((do let (z, c') ← F (Arlib.Computation.Coins.ofFinset s) st.2; let outs ← Cellcounting.Model.Operations.push st.1 z; pure (outs, c')) : Cellcounting.Program.Prog (List Cellcounting.Model.Operations.SRat × ℕ))) R ([], 0)).val.2 ≤ T) :
+    (tapeHeads T).map est = (Pseudocode.repeatRuns R G).map (fun outs => Pseudocode.orderStat outs mid) := by
+  have hL : Analysis.TapeLaw Prod.snd (fun r : List Model.Operations.SRat × ℕ => r.1.map Model.Operations.SRat.get)
+      (fun s => (Arlib.Computation.Charged.repeatFor (fun _ (st : List Cellcounting.Model.Operations.SRat × ℕ) => ((do let (z, c') ← F (Arlib.Computation.Coins.ofFinset s) st.2; let outs ← Cellcounting.Model.Operations.push st.1 z; pure (outs, c')) : Cellcounting.Program.Prog (List Cellcounting.Model.Operations.SRat × ℕ))) R ([], 0)).val)
+      (Pseudocode.repeatRuns R G) :=
+    fun n T hT => repeatRuns_tape_of_window F G hF hW R 0 n T hT
+  rw [← hL.map_view T hcur, PMF.map_comp]
+  congr 1
+  funext s
+  exact hest s
+
+open Arlib.Computation in
+/-- INTERNAL: the `R` runs of `Program.fpras` end at a cursor at most the fair bits they pay
+for, if one run does (`Analysis.CurLe`, `Analysis/CursorFlips.lean`). -/
+theorem runs_curLe (F : Arlib.Computation.Coins ℕ → ℕ → Cellcounting.Program.Prog (Cellcounting.Model.Operations.SRat × ℕ))
+    (hF : ∀ cur, Analysis.CurLe cur Prod.snd (fun s => F (Arlib.Computation.Coins.ofFinset s) cur)) (R : ℕ) :
+    Analysis.CurLe 0 Prod.snd (fun s => Arlib.Computation.Charged.repeatFor (fun _ (st : List Cellcounting.Model.Operations.SRat × ℕ) => ((do let (z, c') ← F (Arlib.Computation.Coins.ofFinset s) st.2; let outs ← Cellcounting.Model.Operations.push st.1 z; pure (outs, c')) : Cellcounting.Program.Prog (List Cellcounting.Model.Operations.SRat × ℕ))) R ([], 0)) := by
+  refine Analysis.cl_loop Prod.snd (fun _ st => ?_) R _ le_rfl
+  refine Analysis.cl_bind (hF st.2) fun z => ?_
+  exact Analysis.cl_det _ fun _ => Analysis.cl_pure _ le_rfl
+
+open Arlib.Computation in
+/-- INTERNAL: the flips of a continuation are among the flips of the sequence. -/
+theorem cost_flip_bind_right {α β : Type} (p : Program.Prog α) (q : α → Program.Prog β) :
+    (q p.val).cost (Model.Operations.Op.rand RandOp.flip) ≤ (p >>= q).cost (Model.Operations.Op.rand RandOp.flip) :=
+  Nat.le_add_left _ _
+
+open Arlib.Computation in
+/-- INTERNAL: the flips of a first step are among the flips of the sequence. -/
+theorem cost_flip_bind_left {α β : Type} (p : Program.Prog α) (q : α → Program.Prog β) :
+    p.cost (Model.Operations.Op.rand RandOp.flip) ≤ (p >>= q).cost (Model.Operations.Op.rand RandOp.flip) :=
+  Nat.le_add_right _ _
+
+open Arlib.Computation in
+/-- INTERNAL: the program's `p`, a charged sum of the small-cell bounds. -/
+theorem pS_val (l : List Program.Entry) (acc : Model.Operations.SNat) :
+    (Charged.foldl (fun acc (e : Program.Entry) => Model.Operations.SNat.add acc e.2.2) l acc).val.get =
+      acc.get + (l.map fun e => e.2.2.get).sum := by
+  rw [Analysis.val_foldl']
+  induction l generalizing acc with
+  | nil => simp
+  | cons a l ih => rw [List.foldl_cons, ih]; simp [add_assoc]
+
+open Arlib.Computation in
+/-- On feasible input, the law of the program's estimate on any tape long enough to cover every read equals the pseudocode fpras law. It splits on p = 0 versus p ≥ 1. -/
+theorem estimate_feasible_law (I : Cellcounting.Instance) (ε δ : ℚ) (hfeas : Cellcounting.Pseudocode.feasible I) (T : ℕ) (hT : ∀ s : Finset ℕ, Cellcounting.Interface.flipsRead I ε δ s ≤ T) : (Cellcounting.tapeHeads T).map (fun (s : Finset ℕ) => Cellcounting.Interface.estimate I ε δ (Arlib.Computation.Coins.ofFinset s)) = Cellcounting.Pseudocode.fpras I ε δ := by
+  have hf := feasible_val I.m I.n (Program.readList (List.ofFn I.r)).val
+      (Program.readList (List.ofFn I.c)).val
+      (Program.readMatrix (List.ofFn fun i => List.ofFn fun j => I.b i j)).val
+      (by simp [readList_val]) (by simp [readList_val])
+  rw [decode_input, decide_eq_true hfeas] at hf
+  have hCv := buildCtx_view I ε δ hfeas
+  have hPv := params_view I ε δ
+  obtain ⟨Pm, hPmd⟩ : ∃ Pm, (Program.params I.m I.n (Program.inputLen I ε δ).val (Model.Operations.SRat.lit ε).val).val = Pm := ⟨_, rfl⟩
+  obtain ⟨C, hCd⟩ : ∃ C, (Program.buildCtx I.m I.n (Program.tighten I.m I.n (Program.readList (List.ofFn I.r)).val (Program.readList (List.ofFn I.c)).val (Program.readMatrix (List.ofFn fun i => List.ofFn fun j => I.b i j)).val).val Pm).val = C := ⟨_, rfl⟩
+  simp only [hPmd, hCd] at hCv hPv
+  obtain ⟨pS, hpSd⟩ : ∃ pS, (Charged.foldl (fun acc (e : Program.Entry) => Model.Operations.SNat.add acc e.2.2) C.small (Model.Operations.SNat.lit 0).val).val = pS := ⟨_, rfl⟩
+  have hpS : pS.get = Pseudocode.pSmall I ε δ := by
+    have hsm : C.small.map (fun (e : Program.Entry) => (e.1, e.2.1, e.2.2.get)) = Pseudocode.smallCells I ε δ := by
+      simp only [Prod.mk.injEq] at hCv
+      exact hCv.2.2.2.2.1
+    rw [← hpSd, pS_val, Interface.SNat.get_lit, zero_add, Pseudocode.pSmall, ← hsm, List.map_map]
+    rfl
+  obtain ⟨sN, hsNd⟩ : ∃ sN, (Program.clog2 (Model.Operations.SRat.natCeil (Model.Operations.SRat.div (Model.Operations.SRat.lit 1).val (Model.Operations.SRat.lit δ).val).val).val).val = sN := ⟨_, rfl⟩
+  have hsN : sN.get = Pseudocode.sRep δ := by
+    rw [← hsNd, Analysis.csv_clog2, Interface.SRat.get_natCeil, Interface.SRat.get_div,
+      Interface.SRat.get_lit, Interface.SRat.get_lit, one_div, Pseudocode.sRep]
+  have hR : (Model.Operations.SNat.index (Model.Operations.SNat.add (Model.Operations.SNat.mul (Model.Operations.SNat.lit 10).val sN).val (Model.Operations.SNat.lit 1).val).val).val = 10 * Pseudocode.sRep δ + 1 := by
+    simp [hsN]
+  have hmid : (Model.Operations.SNat.index (Model.Operations.SNat.mul (Model.Operations.SNat.lit 5).val sN).val).val = 5 * Pseudocode.sRep δ := by
+    simp [hsN]
+  by_cases hp : Pseudocode.pSmall I ε δ = 0
+  · have hz : ((Model.Operations.SNat.eq pS (Model.Operations.SNat.lit 0).val).val = true) := by
+      simp [hpS, hp]
+    rw [Pseudocode.fpras, if_pos hfeas, if_pos hp, ← hR, ← hmid]
+    have hC := hCv
+    refine median_tape_law (fun tape cur => Program.zeroRun C (Model.Operations.SNat.index Pm.H).val (Model.Operations.SRat.lit ε).val tape cur) _ ?_ (fun cur => Analysis.zeroRun_window _ _ _ cur) _ _ T _ ?_ ?_
+    · intro cur n T' hT'
+      exact zeroRun_tape I ε δ C hC _ (by simp only [Prod.mk.injEq] at hPv; simp [hPv.2.2.2.2.2]) _ (Interface.SRat.get_lit ε) cur n T' hT'
+    · intro s
+      simp only [Interface.estimate, Program.fpras, Charged.val_bind]
+      rw [if_pos hf]
+      simp only [Charged.val_bind]
+      rw [hPmd, hCd, hpSd, hsNd, if_pos hz]
+      simp only [Charged.val_bind]
+      rw [Interface.SRat.val_output, orderStat_val]
+    · intro s
+      have h1 := runs_curLe _ (fun cur => Analysis.zeroRun_curLe C (Model.Operations.SNat.index Pm.H).val (Model.Operations.SRat.lit ε).val cur) ((Model.Operations.SNat.index (Model.Operations.SNat.add (Model.Operations.SNat.mul (Model.Operations.SNat.lit 10).val sN).val (Model.Operations.SNat.lit 1).val).val).val) s
+      refine le_trans h1 (le_trans ?_ (hT s))
+      rw [zero_add]
+      unfold Interface.flipsRead Program.fpras
+      iterate 5 refine le_trans ?_ (cost_flip_bind_right _ _)
+      simp only [hf, ↓reduceIte]
+      iterate 20 refine le_trans ?_ (cost_flip_bind_right _ _)
+      simp only [hPmd, hCd, hpSd, hsNd, hz, ↓reduceIte]
+      refine le_trans ?_ (cost_flip_bind_right _ _)
+      exact cost_flip_bind_left _ _
+  · have hz : ((Model.Operations.SNat.eq pS (Model.Operations.SNat.lit 0).val).val = false) := by
+      simp [hpS, hp]
+    have hC := hCv
+    obtain ⟨cs, hcsd⟩ : ∃ cs, (Program.chainSetup C Pm pS (Model.Operations.SRat.lit ε).val).val = cs := ⟨_, rfl⟩
+    have hcs := chainSetup_view I ε δ C hC Pm hPv pS hpS _ (Interface.SRat.get_lit ε)
+    obtain ⟨K, Ph, w0, C0⟩ := cs
+    simp only [hcsd, Prod.mk.injEq] at hcs
+    obtain ⟨hK, hPh, hw0, hw0s, hC0⟩ := hcs
+    rw [Pseudocode.fpras, if_pos hfeas, if_neg hp, ← hR, ← hmid]
+    refine median_tape_law (fun tape cur => Program.annealRun C K tape Ph w0 C0 cur) _ ?_ (fun cur => Analysis.annealRun_window _ _ _ _ _ cur) _ _ T _ ?_ ?_
+    · intro cur n T' hT'
+      exact annealRun_tape I ε δ C hC K (by simp only [Prod.mk.injEq]; exact hK) Ph (by simp only [Prod.mk.injEq]; exact hPh) w0 (by simp only [Prod.mk.injEq]; exact hw0s) hw0 C0 hC0 cur n T' hT'
+    · intro s
+      simp only [Interface.estimate, Program.fpras, Charged.val_bind]
+      rw [if_pos hf]
+      simp only [Charged.val_bind]
+      rw [hPmd, hCd, hpSd, hsNd, if_neg (by rw [hz]; exact Bool.false_ne_true)]
+      simp only [Charged.val_bind, hcsd]
+      rw [Interface.SRat.val_output, orderStat_val]
+    · intro s
+      have h1 := runs_curLe (fun tape cur => Program.annealRun C K tape Ph w0 C0 cur) (fun cur => Analysis.annealRun_curLe C K Ph w0 C0 cur) ((Model.Operations.SNat.index (Model.Operations.SNat.add (Model.Operations.SNat.mul (Model.Operations.SNat.lit 10).val sN).val (Model.Operations.SNat.lit 1).val).val).val) s
+      refine le_trans h1 (le_trans ?_ (hT s))
+      rw [zero_add]
+      unfold Interface.flipsRead Program.fpras
+      iterate 5 refine le_trans ?_ (cost_flip_bind_right _ _)
+      simp only [hf, ↓reduceIte]
+      iterate 20 refine le_trans ?_ (cost_flip_bind_right _ _)
+      simp only [hPmd, hCd, hpSd, hsNd, hz, Bool.false_eq_true, ↓reduceIte]
+      refine le_trans ?_ (cost_flip_bind_right _ _)
+      simp only [hcsd]
+      exact cost_flip_bind_left _ _
+
 /-- The bridge: the output law of the implemented program, run through Program.feasible on the encoded input and then the pipeline, is exactly the pseudocode fpras law, and the program's feasibility gate decides the pseudocode predicate. The analysis rewrites through the first conjunct. The second conjunct comes from feasible_val once readList/readMatrix are shown to round-trip. -/
 theorem output_eq_fpras (I : Cellcounting.Instance) (ε δ : ℚ) : Cellcounting.output I ε δ = Cellcounting.Pseudocode.fpras I ε δ ∧ (Cellcounting.Program.feasible I.m I.n (Cellcounting.Program.readList (List.ofFn I.r)).val (Cellcounting.Program.readList (List.ofFn I.c)).val (Cellcounting.Program.readMatrix (List.ofFn fun i => List.ofFn fun j => I.b i j)).val).val = decide (Cellcounting.Pseudocode.feasible I) := by
   refine ⟨?_, ?_⟩
@@ -876,6 +1026,8 @@ end Cellcounting
 /-! ### Run record
 Newest first. History, not instruction — what this file claims is above.
 
+* r6 · proved · `output_eq_map_estimate` (map composition), `estimate_infeasible` (from `feasible_val`)
+* r6 · proved · `estimate_feasible_law` directly (not via `output_eq_map_estimate`, which `output_eq_fpras` already combines with it); cursor ≤ flips paid via new `Analysis/CursorFlips.lean`
 * r5 · proved · `dyadicDraw_tape` from `uniformBits_tape` via `tapeLaw_map` and `size_pred_eq_clog`; `uniformBits_tape` outright via `Analysis.bitsVal_tape` (new `Analysis/UniformBitsTape.lean`)
 * r4 · proved · `corrAvg_tape` from `sampleBin_tape`, `binOffsets_tape`, `penalty_val`, `pow2Approx_val`; bin-vector length invariant `sampleBin_val_length_le` makes `binPoint` views agree
 * r3 · proved · `binOffsets_tape` from `dyadicDraw_tape` (per-cell law via `tapeLaw_map`, rounds via `tapeLaw_bind`); `hC` supplies `free`, `nFree`, `d`, `B`, `H`
