@@ -1,4 +1,5 @@
 import Cellcounting.Analysis.HyperbolicForm
+import Cellcounting.Analysis.PerronKernel
 
 /-!
 # The cubic contraction of `lem:binary-contraction` (`signatures.tex:122-153`)
@@ -10,9 +11,11 @@ nonnegative coefficient vector `a`, the contraction `M = Σ_i a_i T_i` has at mo
 positive eigenvalue on the full index set.
 
 * `hyp_cubic_contract_pos` is the case of strictly positive `a`: the paper's argument
-  applies the projection inequality to every slice at `a`, sums to
-  `hᵀMh ≤ hᵀ M D⁻¹ M h` with `D = diag((Ma)_i / a_i)`, and concludes with the
-  maximum principle for the irreducible row-stochastic matrix `M'_{ih} u_h / u_i`.
+  applies the projection inequality to every slice at `a` and sums to
+  `xᵀMx ≤ Σ_i a_i (Mx)_i² / (Ma)_i` (`cubic_projection`, `eq:cubic-projection`); together
+  with strictly positive off-diagonal entries, the maximum principle (`perron_kernel`,
+  in `PerronKernel.lean`) makes `M` nonpositive on `{x : (Ma)ᵀx = 0}`, and
+  `hyp_of_kernel` concludes.
 * `hyp_cubic_contract` passes to nonnegative `a` through `a + ε 𝟙`, `ε ↓ 0`
   (`hyp_of_affine_limit`).
 -/
@@ -164,53 +167,63 @@ theorem cubicSum_mass_pos (hcard : 3 ≤ Fintype.card ι) (T : ι → ι → ι 
   rw [hqf]
   exact Finset.sum_pos' (fun u _ => hinner_nonneg u) ⟨u0, Finset.mem_univ u0, hinner_pos⟩
 
+omit [DecidableEq ι] in
+/-- INTERNAL: tensor symmetry gives `xᵀ T_i a = (M x)_i` for `M = Σ_j a_j T_j`.
+TEXLINE: sections/signatures.tex:131-135 -/
+theorem cubicSum_slice_apply (T : ι → ι → ι → ℝ) (hsymm1 : ∀ i u h, T i u h = T u i h)
+    (a x : ι → ℝ) (i : ι) :
+    qf (T i) a x = ∑ k, (∑ j, a j * T j i k) * x k := by
+  unfold qf
+  rw [Finset.sum_comm]
+  refine Finset.sum_congr rfl fun k _ => ?_
+  rw [Finset.sum_mul]
+  exact Finset.sum_congr rfl fun j _ => by rw [hsymm1 i j k]
+
+/-- INTERNAL: the projection inequality `eq:cubic-projection`:
+`xᵀMx ≤ Σ_i a_i (Mx)_i² / (Ma)_i` for `M = Σ_i a_i T_i`.
+PAPER: sections/signatures.tex:136-148 -/
+theorem cubic_projection (hcard : 3 ≤ Fintype.card ι) (T : ι → ι → ι → ℝ)
+    (hsymm1 : ∀ i u h, T i u h = T u i h)
+    (hpos : ∀ i u h, i ≠ u → i ≠ h → u ≠ h → 0 < T i u h)
+    (hzero : ∀ i u h, (i = u ∨ i = h ∨ u = h) → T i u h = 0)
+    (hslice : ∀ i, Hyp (T i)) (a : ι → ℝ) (ha : ∀ i, 0 < a i) (x : ι → ℝ) :
+    qf (fun u h => ∑ i, a i * T i u h) x x ≤
+      ∑ i, a i * (∑ k, (∑ j, a j * T j i k) * x k) ^ 2 / ∑ k, (∑ j, a j * T j i k) * a k := by
+  rw [qf_matrix_sum Finset.univ (fun i u h => a i * T i u h)]
+  refine Finset.sum_le_sum fun i _ => ?_
+  have hsc : qf (fun u h => a i * T i u h) x x = a i * qf (T i) x x := by
+    simp only [qf, Finset.mul_sum]
+    exact Finset.sum_congr rfl fun u _ => Finset.sum_congr rfl fun h _ => by ring
+  rw [hsc, ← cubicSum_slice_apply T hsymm1 a x i, ← cubicSum_slice_apply T hsymm1 a a i,
+    mul_div_assoc]
+  exact mul_le_mul_of_nonneg_left
+    ((hslice i).proj (cubicSum_mass_pos hcard T hpos hzero a ha i) x) (ha i).le
+
 /-- **Cubic contraction, positive coefficients** (`lem:binary-contraction`, the
 full-matrix assertion for `a > 0`): for a symmetric cubic tensor on at least three
 indices, positive on distinct triples, zero on repetitions, with every slice `Hyp`,
 the contraction `Σ_i a_i T_i` with all `a_i > 0` is `Hyp`.
-PAPER: sections/signatures.tex:122-149
 
-STILL OPEN (Perron-Frobenius gap). The elementary scaffolding above
-(`cubicSum_symm`, `cubicSum_diag_zero`, `cubicSum_offDiag_pos`, `cubicSum_mass_pos`)
-establishes that `M := fun u h => ∑ i, a i * T i u h` is symmetric, has zero diagonal,
-strictly positive off-diagonal entries, and that every slice mass `qf (T i) a a` is
-strictly positive, all by elementary `Finset` arithmetic. The paper's remaining step
-(`sections/signatures.tex:134-149`) is genuinely a Perron-Frobenius / maximum-principle
-argument: it forms `D_* = diag((Ma)_i/a_i)`, the congruent matrix
-`M' = D_*^{-1/2} M D_*^{-1/2}`, observes `M' u = u` for `u = D_*^{1/2} a` (trivial from
-the definition of `D_*`) and `M' ⪯ (M')²` as quadratic forms (provable elementarily from
-`Hyp.proj` applied to every slice plus a Titu/Engel-form summation), and then invokes the
-maximum principle for the irreducible row-stochastic matrix `M'_{ih} u_h/u_i` to conclude
-`M'` — hence `M` by `hyp_congr` — has at most one positive eigenvalue.
-
-Two elementary routes were tried and fail:
-(1) `hyp_of_kernel` with the functional `c_i := (M a)_i` (i.e. the hyperplane
-`{v : qf M v a = 0}`): the needed bound `qf M v v ≤ 0` on this hyperplane does **not**
-follow from summing `Hyp.proj` at `u = a` over the slices, because the Titu/Engel
-inequality goes the wrong way (`Σ a_i (qf(T i) a v)²/qf(T i) a a ≥ (qf M a v)²/qf M a a`,
-not `≤`), so `Σ a_i qf(T i) v v = 0` on the hyperplane cannot be forced.
-(2) The identity `M' ⪯ (M')²` alone (together with `M' u = u`), without using that `M'`
-is irreducible with positive off-diagonal entries, is insufficient: a symmetric matrix
-with two eigenvalues both `≥ 1` already satisfies `N² ⪰ N` and has an eigenvalue-1
-eigenvector without having a unique positive eigenvalue. Ruling out a second
-eigenvalue `≥ 1` genuinely needs the simplicity of the Perron eigenvalue for an
-irreducible nonnegative matrix, which is not available in this project or in the pinned
-Mathlib (`Mathlib/LinearAlgebra/Matrix/Irreducible/Defs.lean` has only the definition,
-no Perron-Frobenius spectral theorem).
-
-A correct proof needs either a from-scratch Perron-Frobenius development (simplicity of
-the top eigenvalue of a symmetric irreducible nonnegative matrix, via e.g. a compactness
-argument on the unit sphere plus an irreducibility-driven uniqueness argument) or a
-different, more elementary characterization of the three-index case that this attempt
-did not find.
--/
+The paper's route: the projection inequality summed over slices
+(`cubic_projection`), positivity of off-diagonal entries (`cubicSum_offDiag_pos`) and
+the maximum principle (`perron_kernel`) make `M` nonpositive on `{x : (Ma)ᵀx = 0}`,
+and `hyp_of_kernel` concludes.  The paper's diagonal congruence
+`M' = D_*^{-1/2} M D_*^{-1/2}` is absorbed into `perron_kernel`, which works with the
+pencil `(M, D_*)` directly.
+PAPER: sections/signatures.tex:122-162 -/
 theorem hyp_cubic_contract_pos (hcard : 3 ≤ Fintype.card ι) (T : ι → ι → ι → ℝ)
     (hsymm1 : ∀ i u h, T i u h = T u i h) (hsymm2 : ∀ i u h, T i u h = T i h u)
     (hpos : ∀ i u h, i ≠ u → i ≠ h → u ≠ h → 0 < T i u h)
     (hzero : ∀ i u h, (i = u ∨ i = h ∨ u = h) → T i u h = 0)
     (hslice : ∀ i, Hyp (T i)) (a : ι → ℝ) (ha : ∀ i, 0 < a i) :
     Hyp (fun u h => ∑ i, a i * T i u h) := by
-  sorry
+  have hM := cubicSum_symm T hsymm2 a
+  refine hyp_of_kernel hM (fun i => ∑ k, (∑ j, a j * T j i k) * a k) ?_
+  exact perron_kernel _ hM a ha (cubicSum_offDiag_pos hcard T hpos hzero a ha)
+    (fun i => by
+      rw [← cubicSum_slice_apply T hsymm1 a a i]
+      exact cubicSum_mass_pos hcard T hpos hzero a ha i)
+    (cubic_projection hcard T hsymm1 hpos hzero hslice a ha)
 
 /-- **Cubic contraction** (`lem:binary-contraction`, "the cubic contraction used to
 sum a pair has at most one positive eigenvalue on its full remaining index set"): the
@@ -230,3 +243,9 @@ theorem hyp_cubic_contract (hcard : 3 ≤ Fintype.card ι) (T : ι → ι → ι
   simp only [add_mul, Finset.sum_add_distrib, Finset.mul_sum]
 
 end Cellcounting.Analysis
+
+/-! ### Run record
+Newest first. History, not instruction — what this file claims is above.
+
+* r9 · proved · `hyp_cubic_contract_pos` via `cubic_projection` + `perron_kernel` (compactness and first variation, no spectral theorem)
+-/
