@@ -11,6 +11,7 @@ import Cellcounting.Analysis.RepeatRunsTapeFalse
 import Cellcounting.Analysis.FlipsReadBound
 import Cellcounting.Analysis.BuildCtxView
 import Cellcounting.Analysis.ChainSetupView
+import Cellcounting.Analysis.UniformBitsTape
 
 /-!
 # The program and the model are the same algorithm
@@ -42,6 +43,11 @@ input round-trip (`readList_val`, `readMatrix_val`, `decode_input`) and the unif
 bound on fair bits read (`Analysis.flipsRead_bddAbove`, `Analysis/FlipsReadBound.lean`),
 which makes `tapeLength` cover every execution.  `binOffsets_tape` is proved from
 `dyadicDraw_tape` and `Analysis.dyadicDraw_window`, by induction over the free cells.
+`uniformBits_tape` is proved from `Analysis.bitsVal_tape` (`Analysis/UniformBitsTape.lean`):
+the program loop reads the bits at `cur, …, cur + k - 1` as `Analysis.bitsVal`.
+`dyadicDraw_tape` is proved from `uniformBits_tape` by `Analysis.tapeLaw_map`: the program's
+steps before and after its single `uniformBits` call are tape-free, and its exponent
+`Nat.size (⌈M/ζ⌉₊ - 1)` is the pseudocode's `Nat.clog 2 ⌈M/ζ⌉₊` (`size_pred_eq_clog`).
 `corrAvg_tape` is proved from `sampleBin_tape`, `binOffsets_tape`, `penalty_val` and
 `pow2Approx_val`, by induction over the `N_in` rounds; it uses that a program bin sample
 has at most `C.nFree` coordinates (`sampleBin_val_length_le`), so that its cube point has
@@ -55,11 +61,67 @@ namespace Cellcounting
 
 /-- Reading k fair coins from a uniform tape gives the uniform k-bit integer, and the unread rest of the tape is still uniform and independent. Every later tape lemma is built from this one. -/
 theorem uniformBits_tape (k cur n T : ℕ) (hT : ∀ s : Finset ℕ, (Cellcounting.Program.uniformBits (Arlib.Computation.Coins.ofFinset s) k cur).val.2 + n ≤ T) : (Cellcounting.tapeHeads T).map (fun (s : Finset ℕ) => let r := (Cellcounting.Program.uniformBits (Arlib.Computation.Coins.ofFinset s) k cur).val; (r.1.get, ((s.filter (fun i => r.2 ≤ i)).image (fun i => i - r.2)).filter (fun i => i < n))) = (Cellcounting.Pseudocode.uniformBits k).bind (fun z => (Cellcounting.tapeHeads n).map (fun s' => (z, s'))) := by
-  sorry
+  -- the program reads the bits at `cur, …, cur + k - 1`, most significant first
+  have hval : ∀ (s : Finset ℕ) (k : ℕ),
+      (Program.uniformBits (Arlib.Computation.Coins.ofFinset s) k cur).val.1.get = Analysis.bitsVal s cur k ∧
+      (Program.uniformBits (Arlib.Computation.Coins.ofFinset s) k cur).val.2 = cur + k := by
+    intro s k
+    let step : Model.Operations.SNat × ℕ → Model.Operations.SNat × ℕ := fun st =>
+      (if decide (st.2 ∈ s) = true then (Model.Operations.SNat.add (Model.Operations.SNat.mul st.1 (Model.Operations.SNat.lit 2).val).val (Model.Operations.SNat.lit 1).val).val
+        else (Model.Operations.SNat.mul st.1 (Model.Operations.SNat.lit 2).val).val, st.2 + 1)
+    have hv : (Program.uniformBits (Arlib.Computation.Coins.ofFinset s) k cur).val =
+        (List.range k).foldl (fun b _ => step b) ((Model.Operations.SNat.lit 0).val, cur) := by
+      show (Arlib.Computation.Charged.repeatFor _ k _).val = _
+      rw [Analysis.val_repeatFor']
+      congr 1
+      funext b r
+      have hc : (Program.coin (Arlib.Computation.Coins.ofFinset s) b.2).val = (decide (b.2 ∈ s), b.2 + 1) := rfl
+      rw [Arlib.Computation.Charged.val_bind, hc]
+      simp only [step]
+      cases decide (b.2 ∈ s) <;> rfl
+    rw [hv]
+    clear hv
+    induction k with
+    | zero => exact ⟨rfl, rfl⟩
+    | succ k ih =>
+      rw [List.range_succ, List.foldl_append, List.foldl_cons, List.foldl_nil]
+      obtain ⟨h1, h2⟩ := ih
+      generalize List.foldl (fun b _ => step b) ((Model.Operations.SNat.lit 0).val, cur) (List.range k) = st at h1 h2 ⊢
+      obtain ⟨y, c⟩ := st
+      simp only at h1 h2
+      subst h2
+      refine ⟨?_, rfl⟩
+      simp only [step, Analysis.bitsVal]
+      by_cases h : cur + k ∈ s <;> simp [h, h1, mul_comm]
+  have e : (fun (s : Finset ℕ) => let r := (Program.uniformBits (Arlib.Computation.Coins.ofFinset s) k cur).val;
+      (r.1.get, ((s.filter (fun i => r.2 ≤ i)).image (fun i => i - r.2)).filter (fun i => i < n))) =
+      fun s => (Analysis.bitsVal s cur k, Analysis.tapeRest s (cur + k) n) := by
+    funext s
+    simp only [(hval s k).1, (hval s k).2, Analysis.tapeRest]
+  rw [e]
+  exact Analysis.bitsVal_tape cur k n T (by have := hT ∅; rw [(hval ∅ k).2] at this; omega)
 
 /-- The bounded fair-bit finite-choice draw used by the program has the pseudocode's dyadic law, and the tape left over stays uniform. -/
 theorem dyadicDraw_tape (M : Cellcounting.Model.Operations.SNat) (ζ : Cellcounting.Model.Operations.SRat) (cur n T : ℕ) (hT : ∀ s : Finset ℕ, (Cellcounting.Program.dyadicDraw (Arlib.Computation.Coins.ofFinset s) M ζ cur).val.2 + n ≤ T) : (Cellcounting.tapeHeads T).map (fun (s : Finset ℕ) => let r := (Cellcounting.Program.dyadicDraw (Arlib.Computation.Coins.ofFinset s) M ζ cur).val; (r.1.get, ((s.filter (fun i => r.2 ≤ i)).image (fun i => i - r.2)).filter (fun i => i < n))) = (Cellcounting.Pseudocode.dyadicDraw M.get ζ.get).bind (fun z => (Cellcounting.tapeHeads n).map (fun s' => (z, s'))) := by
-  sorry
+  -- the exponent the program computes
+  let kS := (Program.clog2 (Model.Operations.SRat.natCeil
+      (Model.Operations.SRat.div (Model.Operations.SNat.toRat M).val ζ).val).val).val
+  have hk : kS.get = Nat.clog 2 ⌈(M.get : ℚ) / ζ.get⌉₊ :=
+    Pseudocode.size_pred_eq_clog _
+  have hub : Analysis.TapeLaw Prod.snd (fun r : Model.Operations.SNat × ℕ => r.1.get)
+      (fun s => (Program.uniformBits (Arlib.Computation.Coins.ofFinset s) kS.get cur).val)
+      (Pseudocode.uniformBits kS.get) := fun n T hT => uniformBits_tape kS.get cur n T hT
+  let h : Model.Operations.SNat × ℕ → Model.Operations.SNat × ℕ := fun r =>
+    ((Model.Operations.SNat.div (Model.Operations.SNat.mul M r.1).val
+      (Model.Operations.SNat.pow2 kS).val).val, r.2)
+  have hl := Analysis.tapeLaw_map (π' := Prod.snd) (v' := fun r : Model.Operations.SNat × ℕ => r.1.get)
+    h (fun y => M.get * y / 2 ^ kS.get) (fun _ => rfl) (fun _ => rfl) hub
+  have hval : ∀ s, (Program.dyadicDraw (Arlib.Computation.Coins.ofFinset s) M ζ cur).val =
+      h (Program.uniformBits (Arlib.Computation.Coins.ofFinset s) kS.get cur).val := fun _ => rfl
+  have := hl n T (fun s => by beta_reduce; rw [← hval s]; exact hT s)
+  simp only [← hval, Analysis.tapeRest] at this
+  rw [Pseudocode.dyadicDraw, ← hk]
+  exact this
 
 /-- The program's deterministic exact-rational computation of the penalty agrees with the pseudocode penalty, given a context that matches the instance. -/
 theorem penalty_val (I : Cellcounting.Instance) (ε δ : ℚ) (C : Cellcounting.Program.Ctx) (hC : (C.m, C.n, C.rows.map Cellcounting.Model.Operations.SNat.get, C.cols.map Cellcounting.Model.Operations.SNat.get, C.small.map (fun (e : Cellcounting.Program.Entry) => (e.1, e.2.1, e.2.2.get)), C.nSmall, C.free.map (fun (e : Cellcounting.Program.Entry) => (e.1, e.2.1, e.2.2.get)), C.nFree, C.tree.map (fun (e : Cellcounting.Program.Entry) => (e.1, e.2.1, e.2.2.get)), C.nTree, C.order, C.roots, C.Mf.get, C.d.get, C.B.get, C.H.get, C.Aq.get, C.Hq.get, C.Bq.get) = (I.m, I.n, (List.range I.m).map (Cellcounting.Pseudocode.tRow I), (List.range I.n).map (Cellcounting.Pseudocode.tCol I), Cellcounting.Pseudocode.smallCells I ε δ, Cellcounting.Pseudocode.nSmall I ε δ, (Cellcounting.Pseudocode.forest I ε δ).free, Cellcounting.Pseudocode.nFree I ε δ, (Cellcounting.Pseudocode.forest I ε δ).tree, (Cellcounting.Pseudocode.forest I ε δ).tree.length, Cellcounting.Pseudocode.elimOrder I ε δ, Cellcounting.Pseudocode.roots I ε δ, Cellcounting.Pseudocode.Mf I ε δ, Cellcounting.Pseudocode.dParam I, Cellcounting.Pseudocode.BParam I ε δ, Cellcounting.Pseudocode.HParam I ε δ, (Cellcounting.Pseudocode.AParam I ε δ : ℚ), (Cellcounting.Pseudocode.HParam I ε δ : ℚ), (Cellcounting.Pseudocode.BParam I ε δ : ℚ))) (x y : List Cellcounting.Model.Operations.SNat) (zf : List Cellcounting.Model.Operations.SRat) : (Cellcounting.Program.penalty C x y zf).val.get = Cellcounting.Pseudocode.penalty I ε δ (fun k => (x.getD k default).get) (fun k => (y.getD k default).get) (fun k => (zf.getD k default).get) := by
@@ -814,6 +876,7 @@ end Cellcounting
 /-! ### Run record
 Newest first. History, not instruction — what this file claims is above.
 
+* r5 · proved · `dyadicDraw_tape` from `uniformBits_tape` via `tapeLaw_map` and `size_pred_eq_clog`; `uniformBits_tape` outright via `Analysis.bitsVal_tape` (new `Analysis/UniformBitsTape.lean`)
 * r4 · proved · `corrAvg_tape` from `sampleBin_tape`, `binOffsets_tape`, `penalty_val`, `pow2Approx_val`; bin-vector length invariant `sampleBin_val_length_le` makes `binPoint` views agree
 * r3 · proved · `binOffsets_tape` from `dyadicDraw_tape` (per-cell law via `tapeLaw_map`, rounds via `tapeLaw_bind`); `hC` supplies `free`, `nFree`, `d`, `B`, `H`
 * r2 · assembled · `output_eq_fpras` from its four sibling rungs; tape-length attainment by `Analysis.flipsRead_bddAbove` (finite range over tapes), input round-trip proved here
