@@ -13,6 +13,12 @@ import Cellcounting.Analysis.BuildCtxView
 import Cellcounting.Analysis.ChainSetupView
 import Cellcounting.Analysis.UniformBitsTape
 import Cellcounting.Analysis.CursorFlips
+import Cellcounting.Analysis.NetworkVal
+import Cellcounting.Analysis.MaxFlowCorrect
+import Cellcounting.Analysis.TransportFlowIff
+import Cellcounting.Analysis.FeasibleValProof
+import Cellcounting.Analysis.CellMinVal
+import Cellcounting.Analysis.CellMaxVal
 
 /-!
 # The program and the model are the same algorithm
@@ -62,6 +68,18 @@ proves the cursor never runs ahead of the flips paid for (`Analysis.CurLe`), and
 `cost_flip_bind_right`/`_left` place the runs' flips inside those of `Program.fpras`.
 `output_eq_map_estimate` is the definition of `output` with its maps composed.
 `estimate_infeasible` is the infeasible branch of `Program.fpras`, read through `feasible_val`.
+`feasible_val` is `Analysis.feasible_val_proof` (`Analysis/FeasibleValProof.lean`), proved from `Analysis.network_val` (the program builds the network of
+`sections/scales.tex:8-11`, `Analysis/NetworkVal.lean`), `Analysis.maxFlow_correct` (the
+Edmonds–Karp loop returns the maximum flow value, `Analysis/MaxFlowCorrect.lean`, which rests
+on the cited bound `Analysis.edmondsKarp_bound`) and the transport lemmas of
+`Analysis/TransportFlowIff.lean` (a flow of value `Σ r` is a feasible table).
+`orderStat_val` is proved outright: `Program.insertAsc` builds `insAscList`, whose values
+are a sorted permutation, hence the sorted multiset of `Pseudocode.orderStat`.
+`params_view` is a formula chase through `Program.params`.
+`tighten_view` is proved from `Analysis.cellMin_val` and `Analysis.cellMax_val`
+(`Analysis/CellMinVal.lean`, `Analysis/CellMaxVal.lean`: the binary searches return
+`cellLow`/`cellHigh`, through the flow test on modified bounds) and a loop invariant over the
+row/column double loop of `Program.tighten` (`tightenBody`, `TInv` inside the proof).
 Every other rung is still `sorry`.
 -/
 
@@ -770,29 +788,113 @@ theorem repeatRuns_tape_of_window (F : Arlib.Computation.Coins ℕ → ℕ → C
           (fun r => by simp [view]) (fun n T hT => hF x.2 n T hT)
   exact (key R).2 n T hT
 
+section OrderStat
+open Arlib.Computation Cellcounting.Model.Operations
+
+/-- INTERNAL: the list `Program.insertAsc` builds: `x` goes before the first entry it is
+smaller than. -/
+noncomputable def insAscList (x : SRat) : List SRat → List SRat
+  | [] => [x]
+  | y :: l => if x.get < y.get then x :: y :: l else y :: insAscList x l
+
+/-- INTERNAL: the fold inside `Program.insertAsc`, for any step with its two equations. -/
+theorem insAsc_fold (x : SRat) (g : List SRat × Bool → SRat → List SRat × Bool)
+    (ht : ∀ acc y, g (acc, true) y = (acc ++ [y], true))
+    (hf : ∀ acc y, g (acc, false) y =
+      if x.get < y.get then (acc ++ [x, y], true) else (acc ++ [y], false)) (l : List SRat) :
+    (if (List.foldl g ([], false) l).2 = true then
+        (pure (List.foldl g ([], false) l).1 : Program.Prog (List SRat))
+      else Model.Operations.push (List.foldl g ([], false) l).1 x).val = insAscList x l := by
+  have htrue : ∀ (l acc : List SRat), List.foldl g (acc, true) l = (acc ++ l, true) := by
+    intro l; induction l with
+    | nil => intro acc; simp
+    | cons y l ih => intro acc; rw [List.foldl_cons, ht, ih]; simp
+  have key : ∀ (l acc : List SRat), (if (List.foldl g (acc, false) l).2 = true then
+        (pure (List.foldl g (acc, false) l).1 : Program.Prog (List SRat))
+      else Model.Operations.push (List.foldl g (acc, false) l).1 x).val = acc ++ insAscList x l := by
+    intro l; induction l with
+    | nil => intro acc; simp [insAscList]
+    | cons y l ih =>
+      intro acc
+      rw [List.foldl_cons, hf]
+      by_cases h : x.get < y.get
+      · simp only [h, if_true, htrue, insAscList]; simp
+      · simp only [h, if_false, insAscList]; rw [ih]; simp
+  simpa using key l []
+
+/-- INTERNAL: the value of `Program.insertAsc`. -/
+theorem insertAsc_val (l : List SRat) (x : SRat) : (Program.insertAsc l x).val = insAscList x l := by
+  unfold Program.insertAsc
+  simp only [Charged.val_bind, Analysis.val_foldl']
+  refine insAsc_fold x _ (fun acc y => ?_) (fun acc y => ?_) l
+  · simp
+  · by_cases h : x.get < y.get <;> simp [h]
+
+/-- INTERNAL: insertion permutes the values. -/
+theorem insAscList_perm (x : SRat) (l : List SRat) :
+    ((insAscList x l).map SRat.get).Perm (x.get :: l.map SRat.get) := by
+  induction l with
+  | nil => simp [insAscList]
+  | cons y l ih =>
+    simp only [insAscList]
+    split_ifs
+    · simp
+    · simp only [List.map_cons]
+      exact ((ih.cons y.get).trans (List.Perm.swap _ _ _))
+
+/-- INTERNAL: insertion into a sorted list of values keeps it sorted. -/
+theorem insAscList_sorted (x : SRat) (l : List SRat)
+    (hl : (l.map SRat.get).Pairwise (· ≤ ·)) :
+    ((insAscList x l).map SRat.get).Pairwise (· ≤ ·) := by
+  induction l with
+  | nil => simp [insAscList]
+  | cons y l ih =>
+    simp only [List.map_cons, List.pairwise_cons] at hl
+    simp only [insAscList]
+    split_ifs with h
+    · simp only [List.map_cons, List.pairwise_cons]
+      refine ⟨fun a ha => ?_, hl.1, hl.2⟩
+      rcases List.mem_cons.1 ha with rfl | ha
+      · exact h.le
+      · exact h.le.trans (hl.1 _ ha)
+    · simp only [List.map_cons, List.pairwise_cons]
+      refine ⟨fun a ha => ?_, ih hl.2⟩
+      rcases List.mem_cons.1 ((insAscList_perm x l).mem_iff.1 ha) with rfl | ha
+      · exact not_lt.1 h
+      · exact hl.1 a ha
+
 /-- The program's median selection by exact comparisons returns the pseudocode order statistic. -/
 theorem orderStat_val (outs : List Cellcounting.Model.Operations.SRat) (idx : ℕ) : (Cellcounting.Program.orderStat outs idx).val.get = Cellcounting.Pseudocode.orderStat (outs.map Cellcounting.Model.Operations.SRat.get) idx := by
-  sorry
+  unfold Program.orderStat Pseudocode.orderStat
+  simp only [Charged.val_bind, Analysis.val_foldl', Cellcounting.Interface.val_get, insertAsc_val]
+  set S := List.foldl (fun acc x => insAscList x acc) [] outs with hS
+  have key : ∀ (l acc : List SRat), (acc.map SRat.get).Pairwise (· ≤ ·) →
+      ((List.foldl (fun acc x => insAscList x acc) acc l).map SRat.get).Pairwise (· ≤ ·) ∧
+      ((List.foldl (fun acc x => insAscList x acc) acc l).map SRat.get).Perm
+        (acc.map SRat.get ++ l.map SRat.get) := by
+    intro l
+    induction l with
+    | nil => intro acc h; simp [h]
+    | cons y l ih =>
+      intro acc h
+      obtain ⟨h1, h2⟩ := ih (insAscList y acc) (insAscList_sorted y acc h)
+      refine ⟨h1, h2.trans ?_⟩
+      simp only [List.map_cons]
+      refine ((insAscList_perm y acc).append_right _).trans ?_
+      exact List.perm_middle.symm
+  obtain ⟨hsort, hperm⟩ := key outs [] (by simp)
+  simp only [List.map_nil, List.nil_append] at hperm
+  have heq : S.map SRat.get = ((outs.map SRat.get : List ℚ) : Multiset ℚ).sort (· ≤ ·) := by
+    refine List.Perm.eq_of_pairwise' hsort (Multiset.pairwise_sort _ _) ?_
+    refine hperm.trans ?_
+    rw [← Multiset.coe_eq_coe, Multiset.sort_eq]
+  rw [← heq, ← Cellcounting.Interface.SRat.get_default, List.getD_map]
+
+end OrderStat
 
 /-- The program's preliminary deterministic flow test decides exactly the pseudocode feasibility predicate. -/
 theorem feasible_val (m n : ℕ) (r c : List Cellcounting.Model.Operations.SNat) (b : List (List Cellcounting.Model.Operations.SNat)) (hr : r.length = m) (hc : c.length = n) : (Cellcounting.Program.feasible m n r c b).val = decide (Cellcounting.Pseudocode.feasible ⟨m, n, fun i => (r.getD i.val default).get, fun j => (c.getD j.val default).get, fun i j => ((b.getD i.val []).getD j.val default).get⟩) := by
-  sorry
-
-/-- On feasible input, the program's tightening step produces the pseudocode's tightened margins and retained cells. -/
-theorem tighten_view (I : Cellcounting.Instance) (hfeas : Cellcounting.Pseudocode.feasible I) : let T := (Cellcounting.Program.tighten I.m I.n (Cellcounting.Program.readList (List.ofFn I.r)).val (Cellcounting.Program.readList (List.ofFn I.c)).val (Cellcounting.Program.readMatrix (List.ofFn fun i => List.ofFn fun j => I.b i j)).val).val; (T.rows.map Cellcounting.Model.Operations.SNat.get, T.cols.map Cellcounting.Model.Operations.SNat.get, T.cells.map (fun (e : Cellcounting.Program.Entry) => (e.1, e.2.1, e.2.2.get))) = ((List.range I.m).map (Cellcounting.Pseudocode.tRow I), (List.range I.n).map (Cellcounting.Pseudocode.tCol I), Cellcounting.Pseudocode.retained I) := by
-  sorry
-
-/-- The program computes the scale parameters of eq:parameters exactly as the pseudocode defines them. -/
-theorem params_view (I : Cellcounting.Instance) (ε δ : ℚ) : let Pm := (Cellcounting.Program.params I.m I.n (Cellcounting.Program.inputLen I ε δ).val (Cellcounting.Model.Operations.SRat.lit ε).val).val; (Pm.d.get, Pm.K.get, Pm.A.get, Pm.B.get, Pm.W.get, Pm.H.get) = (Cellcounting.Pseudocode.dParam I, Cellcounting.Pseudocode.KParam I ε δ, Cellcounting.Pseudocode.AParam I ε δ, Cellcounting.Pseudocode.BParam I ε δ, Cellcounting.Pseudocode.WParam I ε δ, Cellcounting.Pseudocode.HParam I ε δ) := by
-  sorry
-
-/-- The program's context (small/free split, forest, elimination order, M_f) matches the pseudocode's derived data field by field. This discharges the hC hypothesis of every tape lemma. -/
-theorem buildCtx_view (I : Cellcounting.Instance) (ε δ : ℚ) (hfeas : Cellcounting.Pseudocode.feasible I) : let C := (Cellcounting.Program.buildCtx I.m I.n (Cellcounting.Program.tighten I.m I.n (Cellcounting.Program.readList (List.ofFn I.r)).val (Cellcounting.Program.readList (List.ofFn I.c)).val (Cellcounting.Program.readMatrix (List.ofFn fun i => List.ofFn fun j => I.b i j)).val).val (Cellcounting.Program.params I.m I.n (Cellcounting.Program.inputLen I ε δ).val (Cellcounting.Model.Operations.SRat.lit ε).val).val).val; (C.m, C.n, C.rows.map Cellcounting.Model.Operations.SNat.get, C.cols.map Cellcounting.Model.Operations.SNat.get, C.small.map (fun (e : Cellcounting.Program.Entry) => (e.1, e.2.1, e.2.2.get)), C.nSmall, C.free.map (fun (e : Cellcounting.Program.Entry) => (e.1, e.2.1, e.2.2.get)), C.nFree, C.tree.map (fun (e : Cellcounting.Program.Entry) => (e.1, e.2.1, e.2.2.get)), C.nTree, C.order, C.roots, C.Mf.get, C.d.get, C.B.get, C.H.get, C.Aq.get, C.Hq.get, C.Bq.get) = (I.m, I.n, (List.range I.m).map (Cellcounting.Pseudocode.tRow I), (List.range I.n).map (Cellcounting.Pseudocode.tCol I), Cellcounting.Pseudocode.smallCells I ε δ, Cellcounting.Pseudocode.nSmall I ε δ, (Cellcounting.Pseudocode.forest I ε δ).free, Cellcounting.Pseudocode.nFree I ε δ, (Cellcounting.Pseudocode.forest I ε δ).tree, (Cellcounting.Pseudocode.forest I ε δ).tree.length, Cellcounting.Pseudocode.elimOrder I ε δ, Cellcounting.Pseudocode.roots I ε δ, Cellcounting.Pseudocode.Mf I ε δ, Cellcounting.Pseudocode.dParam I, Cellcounting.Pseudocode.BParam I ε δ, Cellcounting.Pseudocode.HParam I ε δ, (Cellcounting.Pseudocode.AParam I ε δ : ℚ), (Cellcounting.Pseudocode.HParam I ε δ : ℚ), (Cellcounting.Pseudocode.BParam I ε δ : ℚ)) := by
-  exact Analysis.buildCtx_view_of I ε δ _ _ (tighten_view I hfeas) (params_view I ε δ)
-
-/-- The program's chain and phase parameters, initial multipliers w⁽⁰⁾ (closed form of lem:initialization) and C(0) equal the pseudocode's values. -/
-theorem chainSetup_view (I : Cellcounting.Instance) (ε δ : ℚ) (C : Cellcounting.Program.Ctx) (hC : (C.m, C.n, C.rows.map Cellcounting.Model.Operations.SNat.get, C.cols.map Cellcounting.Model.Operations.SNat.get, C.small.map (fun (e : Cellcounting.Program.Entry) => (e.1, e.2.1, e.2.2.get)), C.nSmall, C.free.map (fun (e : Cellcounting.Program.Entry) => (e.1, e.2.1, e.2.2.get)), C.nFree, C.tree.map (fun (e : Cellcounting.Program.Entry) => (e.1, e.2.1, e.2.2.get)), C.nTree, C.order, C.roots, C.Mf.get, C.d.get, C.B.get, C.H.get, C.Aq.get, C.Hq.get, C.Bq.get) = (I.m, I.n, (List.range I.m).map (Cellcounting.Pseudocode.tRow I), (List.range I.n).map (Cellcounting.Pseudocode.tCol I), Cellcounting.Pseudocode.smallCells I ε δ, Cellcounting.Pseudocode.nSmall I ε δ, (Cellcounting.Pseudocode.forest I ε δ).free, Cellcounting.Pseudocode.nFree I ε δ, (Cellcounting.Pseudocode.forest I ε δ).tree, (Cellcounting.Pseudocode.forest I ε δ).tree.length, Cellcounting.Pseudocode.elimOrder I ε δ, Cellcounting.Pseudocode.roots I ε δ, Cellcounting.Pseudocode.Mf I ε δ, Cellcounting.Pseudocode.dParam I, Cellcounting.Pseudocode.BParam I ε δ, Cellcounting.Pseudocode.HParam I ε δ, (Cellcounting.Pseudocode.AParam I ε δ : ℚ), (Cellcounting.Pseudocode.HParam I ε δ : ℚ), (Cellcounting.Pseudocode.BParam I ε δ : ℚ))) (Pm : Cellcounting.Program.Params) (hPm : (Pm.d.get, Pm.K.get, Pm.A.get, Pm.B.get, Pm.W.get, Pm.H.get) = (Cellcounting.Pseudocode.dParam I, Cellcounting.Pseudocode.KParam I ε δ, Cellcounting.Pseudocode.AParam I ε δ, Cellcounting.Pseudocode.BParam I ε δ, Cellcounting.Pseudocode.WParam I ε δ, Cellcounting.Pseudocode.HParam I ε δ)) (pS : Cellcounting.Model.Operations.SNat) (hp : pS.get = Cellcounting.Pseudocode.pSmall I ε δ) (εS : Cellcounting.Model.Operations.SRat) (hε : εS.get = ε) : let r := (Cellcounting.Program.chainSetup C Pm pS εS).val; ((r.1.p, r.1.pS.get, r.1.nsm, r.1.pairCell, r.1.cellFirst, r.1.smallB.map Cellcounting.Model.Operations.SNat.get, r.1.ξ.get, r.1.kAcc, r.1.kAccS.get), (r.2.1.τ.get, r.2.1.Bret.get, r.2.1.BretN, r.2.1.Nav.get, r.2.1.NavN, r.2.1.Hn), (fun (i l : ℕ) => ((r.2.2.1.getD i []).getD l default).get), (r.2.2.1.length, r.2.2.1.map List.length), r.2.2.2.get) = ((Cellcounting.Pseudocode.pSmall I ε δ, Cellcounting.Pseudocode.pSmall I ε δ, Cellcounting.Pseudocode.nSmall I ε δ, Cellcounting.Pseudocode.pairCells I ε δ, (List.range (Cellcounting.Pseudocode.nSmall I ε δ)).map (Cellcounting.Pseudocode.cellFirst I ε δ), (List.range (Cellcounting.Pseudocode.nSmall I ε δ)).map (Cellcounting.Pseudocode.smallB I ε δ), Cellcounting.Pseudocode.ξParam I ε δ, Cellcounting.Pseudocode.kAccParam I ε δ, Cellcounting.Pseudocode.kAccParam I ε δ), (Cellcounting.Pseudocode.τParam I ε δ, Cellcounting.Pseudocode.BretParam I ε δ, Cellcounting.Pseudocode.BretParam I ε δ, Cellcounting.Pseudocode.NavParam I ε δ, Cellcounting.Pseudocode.NavParam I ε δ, Cellcounting.Pseudocode.HParam I ε δ), Cellcounting.Pseudocode.w0 I ε δ, (Cellcounting.Pseudocode.pSmall I ε δ, List.replicate (Cellcounting.Pseudocode.pSmall I ε δ) (Cellcounting.Pseudocode.pSmall I ε δ)), Cellcounting.Pseudocode.C0 I ε δ) := by
-  exact Analysis.chainSetup_view_of I ε δ C hC Pm hPm pS hp εS hε
+  exact Analysis.feasible_val_proof m n r c b hr hc
 
 /-- INTERNAL: the program's input reader stores each number as its literal. Used to show
 that the instance `feasible_val` reconstructs from the encoded input is `I` itself. -/
@@ -851,6 +953,254 @@ theorem decode_input (I : Instance) :
     rw [← readList_val]
     exact readList_ofFn_getD (fun j => b i j) j
   simp only [readList_ofFn_getD, hb]
+
+section Tighten
+open Arlib.Computation Cellcounting.Model.Operations
+
+/-- INTERNAL: reading back entry `(i, j)` of an encoded matrix gives `b i j`. -/
+theorem readMatrix_ofFn_getD {m n : ℕ} (b : Fin m → Fin n → ℕ) (i : Fin m) (j : Fin n) :
+    (((Program.readMatrix (List.ofFn fun i => List.ofFn fun j => b i j)).val.getD
+      i.val []).getD j.val default).get = b i j := by
+  rw [readMatrix_val, List.getD_eq_getElem?_getD (l := List.map _ _), List.getElem?_map,
+    List.getElem?_ofFn, dif_pos i.isLt]
+  simp only [Option.map_some, Option.getD_some]
+  rw [← readList_val]
+  exact readList_ofFn_getD (fun j => b i j) j
+
+/-- INTERNAL: `l_ij` read through natural-number indices, `0` outside the table. -/
+noncomputable def lowN (I : Instance) (i j : ℕ) : ℕ :=
+  if h : i < I.m ∧ j < I.n then Pseudocode.cellLow I ⟨i, h.1⟩ ⟨j, h.2⟩ else 0
+
+/-- INTERNAL: the retained cell `(i, j)`, if any, read through natural-number indices. -/
+noncomputable def cellOpt (I : Instance) (i j : ℕ) : Option Pseudocode.Entry :=
+  if h : i < I.m ∧ j < I.n then
+    (if 0 < Pseudocode.cellRange I ⟨i, h.1⟩ ⟨j, h.2⟩ then
+      some (i, j, Pseudocode.cellRange I ⟨i, h.1⟩ ⟨j, h.2⟩) else none)
+  else none
+
+/-- INTERNAL: the retained cells, row-major over natural-number indices. -/
+theorem retained_eq (I : Instance) : Pseudocode.retained I =
+    (List.range I.m).flatMap (fun i => (List.range I.n).filterMap (cellOpt I i)) := by
+  unfold Pseudocode.retained
+  rw [show List.range I.m = (List.finRange I.m).map Fin.val from
+    List.map_coe_finRange_eq_range.symm, List.flatMap_map]
+  refine List.flatMap_congr fun i _ => ?_
+  rw [show List.range I.n = (List.finRange I.n).map Fin.val from
+    List.map_coe_finRange_eq_range.symm, List.filterMap_map]
+  refine List.filterMap_congr fun j _ => ?_
+  simp [cellOpt, i.isLt, j.isLt]
+
+/-- INTERNAL: entrywise differences, as `Program.subLists` computes them. -/
+theorem subLists_val (a b : List SNat) (k : ℕ) :
+    (Program.subLists a b k).val =
+      (List.range k).map (fun i => (SNat.sub (a.getD i default) (b.getD i default)).val) := by
+  induction k with
+  | zero => rfl
+  | succ k ih =>
+    unfold Program.subLists at ih ⊢
+    rw [Analysis.nv_repeatFor_succ, ih, List.range_succ, List.map_append]
+    simp
+
+/-- INTERNAL: the cell step of `Program.tighten`, verbatim, so that loop lemmas see one
+stable term. -/
+def tightenBody (m n : ℕ) (r c : List SNat) (b : List (List SNat)) (z : SNat) (i j : ℕ)
+    (st : List SNat × List SNat × List Program.Entry) :
+    Program.Prog (List SNat × List SNat × List Program.Entry) := do
+  let l ← Program.cellMin m n r c b i j
+  let u ← Program.cellMax m n r c b i j l
+  let w ← SNat.sub u l
+  let lr ← Model.Operations.get st.1 i
+  let lr' ← SNat.add lr l
+  let lowR ← Model.Operations.set st.1 i lr'
+  let lc ← Model.Operations.get st.2.1 j
+  let lc' ← SNat.add lc l
+  let lowC ← Model.Operations.set st.2.1 j lc'
+  let keep ← SNat.lt z w
+  if keep then do
+    let cells ← Model.Operations.push st.2.2 (i, j, w)
+    pure (lowR, lowC, cells)
+  else pure (lowR, lowC, st.2.2)
+
+/-- INTERNAL: `Program.tighten` in terms of `tightenBody` (definitional). -/
+theorem tighten_eq (m n : ℕ) (r c : List SNat) (b : List (List SNat)) :
+    Program.tighten m n r c b = (do
+      let z ← SNat.lit 0
+      let lowR0 ← Model.Operations.replicate m z
+      let lowC0 ← Model.Operations.replicate n z
+      let st ← Charged.repeatFor (fun i st0 =>
+        Charged.repeatFor (tightenBody m n r c b z i) n st0) m (lowR0, lowC0, [])
+      let rows ← Program.subLists r st.1 m
+      let cols ← Program.subLists c st.2.1 n
+      pure ⟨rows, cols, st.2.2⟩) := rfl
+
+/-- INTERNAL: the value of one cell step of the tightening loop. -/
+theorem tightenBody_val (m n : ℕ) (r c : List SNat) (b : List (List SNat)) (z : SNat)
+    (hz : z.get = 0) (i j : ℕ) (st : List SNat × List SNat × List Program.Entry) :
+    (tightenBody m n r c b z i j st).val =
+      (st.1.set i (SNat.add (st.1.getD i default) (Program.cellMin m n r c b i j).val).val,
+        st.2.1.set j (SNat.add (st.2.1.getD j default) (Program.cellMin m n r c b i j).val).val,
+        if 0 < (Program.cellMax m n r c b i j (Program.cellMin m n r c b i j).val).val.get -
+            (Program.cellMin m n r c b i j).val.get then
+          st.2.2 ++ [(i, j, (SNat.sub (Program.cellMax m n r c b i j
+            (Program.cellMin m n r c b i j).val).val (Program.cellMin m n r c b i j).val).val)]
+        else st.2.2) := by
+  unfold tightenBody
+  simp only [Charged.val_bind, Cellcounting.Interface.val_get, Cellcounting.Interface.val_set,
+    Cellcounting.Interface.SNat.val_lt, Cellcounting.Interface.SNat.get_sub, hz]
+  split_ifs with h <;> simp_all
+
+/-- On feasible input, the program's tightening step produces the pseudocode's tightened margins and retained cells. -/
+theorem tighten_view (I : Cellcounting.Instance) (hfeas : Cellcounting.Pseudocode.feasible I) : let T := (Cellcounting.Program.tighten I.m I.n (Cellcounting.Program.readList (List.ofFn I.r)).val (Cellcounting.Program.readList (List.ofFn I.c)).val (Cellcounting.Program.readMatrix (List.ofFn fun i => List.ofFn fun j => I.b i j)).val).val; (T.rows.map Cellcounting.Model.Operations.SNat.get, T.cols.map Cellcounting.Model.Operations.SNat.get, T.cells.map (fun (e : Cellcounting.Program.Entry) => (e.1, e.2.1, e.2.2.get))) = ((List.range I.m).map (Cellcounting.Pseudocode.tRow I), (List.range I.n).map (Cellcounting.Pseudocode.tCol I), Cellcounting.Pseudocode.retained I)  := by
+  intro T
+  set r := (Program.readList (List.ofFn I.r)).val with hrdef
+  set c := (Program.readList (List.ofFn I.c)).val with hcdef
+  set b := (Program.readMatrix (List.ofFn fun i => List.ofFn fun j => I.b i j)).val with hbdef
+  have hr : r.length = I.m := by simp [hrdef, readList_val]
+  have hc : c.length = I.n := by simp [hcdef, readList_val]
+  have hb : b.length = I.m := by simp [hbdef, readMatrix_val]
+  have hbrow : ∀ row ∈ b, row.length = I.n := by
+    intro row h
+    rw [hbdef, readMatrix_val] at h
+    simp only [List.map_ofFn, List.mem_ofFn, Function.comp_apply] at h
+    obtain ⟨i, rfl⟩ := h
+    simp
+  have hrv : ∀ i : Fin I.m, (r.getD i.val default).get = I.r i := readList_ofFn_getD I.r
+  have hcv : ∀ j : Fin I.n, (c.getD j.val default).get = I.c j := readList_ofFn_getD I.c
+  have hbv : ∀ (i : Fin I.m) (j : Fin I.n), ((b.getD i.val []).getD j.val default).get = I.b i j :=
+    readMatrix_ofFn_getD I.b
+  have hmin : ∀ i j, i < I.m → j < I.n →
+      (Program.cellMin I.m I.n r c b i j).val.get = lowN I i j := by
+    intro i j hi hj
+    have := Analysis.cellMin_val I hfeas r c b hr hc hb hbrow hrv hcv hbv ⟨i, hi⟩ ⟨j, hj⟩
+    exact this.trans (by rw [lowN, dif_pos ⟨hi, hj⟩])
+  have hmax : ∀ i j, (hi : i < I.m) → (hj : j < I.n) →
+      (Program.cellMax I.m I.n r c b i j (Program.cellMin I.m I.n r c b i j).val).val.get =
+        Pseudocode.cellHigh I ⟨i, hi⟩ ⟨j, hj⟩ := by
+    intro i j hi hj
+    have := Analysis.cellMax_val I hfeas r c b hr hc hb hbrow hrv hcv hbv ⟨i, hi⟩ ⟨j, hj⟩
+      (Program.cellMin I.m I.n r c b i j).val (by rw [hmin i j hi hj, lowN, dif_pos ⟨hi, hj⟩])
+    simpa only using this
+  -- the loop invariant after full rows `< a` and columns `< bb` of row `a`
+  let view : Program.Entry → Pseudocode.Entry := fun e => (e.1, e.2.1, e.2.2.get)
+  let TInv : ℕ → ℕ → List SNat × List SNat × List Program.Entry → Prop := fun a bb st =>
+    st.1.length = I.m ∧ st.2.1.length = I.n ∧
+    (∀ i < I.m, (st.1.getD i default).get = if i < a then ∑ j ∈ Finset.range I.n, lowN I i j
+      else if i = a then ∑ j ∈ Finset.range bb, lowN I a j else 0) ∧
+    (∀ j < I.n, (st.2.1.getD j default).get =
+      ∑ i ∈ Finset.range a, lowN I i j + if j < bb then lowN I a j else 0) ∧
+    st.2.2.map view = (List.range a).flatMap (fun i => (List.range I.n).filterMap (cellOpt I i)) ++
+      (List.range bb).filterMap (cellOpt I a)
+  have hz : (SNat.lit 0).val.get = 0 := rfl
+  have hrep : ∀ (k i : ℕ), ((List.replicate k (SNat.lit 0).val).getD i default).get = 0 := by
+    intro k i
+    simp only [List.getD_eq_getElem?_getD, List.getElem?_replicate]
+    split_ifs <;> rfl
+  have hinit : TInv 0 0 (List.replicate I.m (SNat.lit 0).val, List.replicate I.n (SNat.lit 0).val, []) := by
+    refine ⟨by simp, by simp, fun i _ => ?_, fun j _ => ?_, by simp⟩
+    · rw [hrep]; split_ifs <;> first | omega | simp
+    · rw [hrep]; simp
+  have hinner : ∀ a, a < I.m → ∀ bb st, bb < I.n → TInv a bb st →
+      TInv a (bb + 1) (tightenBody I.m I.n r c b (SNat.lit 0).val a bb st).val := by
+    intro a ha bb st hbb ⟨h1, h2, h3, h4, h5⟩
+    rw [tightenBody_val _ _ _ _ _ _ hz]
+    refine ⟨by simp [h1], by simp [h2], fun i hi => ?_, fun j hj => ?_, ?_⟩
+    · simp only
+      rw [Analysis.bs_getD_set]
+      by_cases hia : i = a
+      · subst hia
+        rw [if_pos ⟨rfl, by omega⟩, Cellcounting.Interface.SNat.get_add, h3 i hi, hmin i bb hi hbb,
+          if_neg (lt_irrefl i), if_pos rfl, if_neg (lt_irrefl i), if_pos rfl, Finset.sum_range_succ]
+      · rw [if_neg (fun h => hia h.1.symm), h3 i hi]
+        by_cases hlt : i < a
+        · simp [hlt]
+        · simp [hlt, hia]
+    · simp only
+      rw [Analysis.bs_getD_set]
+      by_cases hjb : j = bb
+      · subst hjb
+        rw [if_pos ⟨rfl, by omega⟩, Cellcounting.Interface.SNat.get_add, h4 j hj, hmin a j ha hj,
+          if_neg (lt_irrefl j), if_pos (Nat.lt_succ_self j)]
+        ring
+      · rw [if_neg (fun h => hjb h.1.symm), h4 j hj]
+        congr 1
+        by_cases hlt : j < bb
+        · rw [if_pos hlt, if_pos (by omega)]
+        · rw [if_neg hlt, if_neg (by omega)]
+    · simp only
+      rw [List.range_succ, List.filterMap_append, ← List.append_assoc, ← h5]
+      have hco : cellOpt I a bb = if 0 < Pseudocode.cellRange I ⟨a, ha⟩ ⟨bb, hbb⟩ then
+          some (a, bb, Pseudocode.cellRange I ⟨a, ha⟩ ⟨bb, hbb⟩) else none := by
+        rw [cellOpt, dif_pos ⟨ha, hbb⟩]
+      have hw : (Program.cellMax I.m I.n r c b a bb (Program.cellMin I.m I.n r c b a bb).val).val.get -
+          (Program.cellMin I.m I.n r c b a bb).val.get = Pseudocode.cellRange I ⟨a, ha⟩ ⟨bb, hbb⟩ := by
+        rw [hmax a bb ha hbb, hmin a bb ha hbb, lowN, dif_pos ⟨ha, hbb⟩]; rfl
+      have hfm : List.filterMap (cellOpt I a) [bb] = (cellOpt I a bb).toList := by
+        cases h : cellOpt I a bb <;> simp [h]
+      rw [hfm, hco, hw]
+      split_ifs with hpos
+      · simp only [List.map_append, List.map_cons, List.map_nil, view,
+          Cellcounting.Interface.SNat.get_sub, hw, Option.toList_some]
+      · simp
+  have houter : ∀ a st, a < I.m → TInv a 0 st →
+      TInv (a + 1) 0 (Charged.repeatFor (tightenBody I.m I.n r c b (SNat.lit 0).val a) I.n st).val := by
+    intro a st ha hst
+    obtain ⟨h1, h2, h3, h4, h5⟩ := Analysis.nv_loop_inv (tightenBody I.m I.n r c b (SNat.lit 0).val a)
+      (fun bb st => TInv a bb st) I.n st hst (fun bb st hbb h => hinner a ha bb st hbb h)
+    refine ⟨h1, h2, fun i hi => ?_, fun j hj => ?_, ?_⟩
+    · rw [h3 i hi]
+      by_cases hlt : i < a
+      · simp [hlt, show i < a + 1 by omega]
+      · by_cases hia : i = a
+        · subst hia; simp
+        · simp [hlt, hia, show ¬ i < a + 1 by omega]
+    · rw [h4 j hj, if_pos hj, Finset.sum_range_succ]; simp
+    · rw [h5, List.range_succ, List.flatMap_append]; simp
+  have hloop := Analysis.nv_loop_inv
+    (fun i st0 => Charged.repeatFor (tightenBody I.m I.n r c b (SNat.lit 0).val i) I.n st0)
+    (fun a st => TInv a 0 st) I.m _ hinit (fun a st ha h => houter a st ha h)
+  obtain ⟨g1, g2, g3, g4, g5⟩ := hloop
+  simp only [T, tighten_eq, Charged.val_bind, Cellcounting.Interface.val_replicate,
+    Charged.val_pure, subLists_val, List.map_map]
+  refine Prod.ext ?_ (Prod.ext ?_ ?_)
+  · refine List.map_congr_left fun i hi => ?_
+    have hi' := List.mem_range.1 hi
+    simp only [Function.comp_apply, Cellcounting.Interface.SNat.get_sub]
+    rw [g3 i hi', if_pos hi', Pseudocode.tRow, dif_pos hi', hrv ⟨i, hi'⟩,
+      ← Fin.sum_univ_eq_sum_range (fun j => lowN I i j)]
+    congr 1
+    exact Finset.sum_congr rfl fun j _ => by rw [lowN, dif_pos ⟨hi', j.isLt⟩]
+  · refine List.map_congr_left fun j hj => ?_
+    have hj' := List.mem_range.1 hj
+    simp only [Function.comp_apply, Cellcounting.Interface.SNat.get_sub]
+    rw [g4 j hj', if_neg (Nat.not_lt_zero j), add_zero, Pseudocode.tCol, dif_pos hj', hcv ⟨j, hj'⟩,
+      ← Fin.sum_univ_eq_sum_range (fun i => lowN I i j)]
+    congr 1
+    exact Finset.sum_congr rfl fun i _ => by rw [lowN, dif_pos ⟨i.isLt, hj'⟩]
+  · show List.map view _ = _
+    rw [g5, retained_eq]; simp
+
+end Tighten
+
+/-- The program computes the scale parameters of eq:parameters exactly as the pseudocode defines them. -/
+theorem params_view (I : Cellcounting.Instance) (ε δ : ℚ) : let Pm := (Cellcounting.Program.params I.m I.n (Cellcounting.Program.inputLen I ε δ).val (Cellcounting.Model.Operations.SRat.lit ε).val).val; (Pm.d.get, Pm.K.get, Pm.A.get, Pm.B.get, Pm.W.get, Pm.H.get) = (Cellcounting.Pseudocode.dParam I, Cellcounting.Pseudocode.KParam I ε δ, Cellcounting.Pseudocode.AParam I ε δ, Cellcounting.Pseudocode.BParam I ε δ, Cellcounting.Pseudocode.WParam I ε δ, Cellcounting.Pseudocode.HParam I ε δ)  := by
+  intro Pm
+  simp only [Pm, Program.params, Program.clog2, Program.inputLen,
+    Arlib.Computation.Charged.val_bind, Arlib.Computation.Charged.val_pure,
+    Interface.SNat.get_lit, Interface.SNat.get_add, Interface.SNat.get_mul, Interface.SNat.get_sub,
+    Interface.SNat.get_size, Interface.SNat.get_toRat, Interface.SRat.get_lit, Interface.SRat.get_div,
+    Interface.SRat.get_natCeil, Interface.SNat.get_inputLength, Pseudocode.size_pred_eq_clog,
+    Pseudocode.dParam, Pseudocode.KParam, Pseudocode.γParam, Pseudocode.AParam, Pseudocode.BParam,
+    Pseudocode.WParam, Pseudocode.HParam, one_div]
+  refine Prod.ext rfl (Prod.ext rfl (Prod.ext ?_ (Prod.ext ?_ (Prod.ext ?_ ?_)))) <;>
+    push_cast <;> ring_nf
+
+/-- The program's context (small/free split, forest, elimination order, M_f) matches the pseudocode's derived data field by field. This discharges the hC hypothesis of every tape lemma. -/
+theorem buildCtx_view (I : Cellcounting.Instance) (ε δ : ℚ) (hfeas : Cellcounting.Pseudocode.feasible I) : let C := (Cellcounting.Program.buildCtx I.m I.n (Cellcounting.Program.tighten I.m I.n (Cellcounting.Program.readList (List.ofFn I.r)).val (Cellcounting.Program.readList (List.ofFn I.c)).val (Cellcounting.Program.readMatrix (List.ofFn fun i => List.ofFn fun j => I.b i j)).val).val (Cellcounting.Program.params I.m I.n (Cellcounting.Program.inputLen I ε δ).val (Cellcounting.Model.Operations.SRat.lit ε).val).val).val; (C.m, C.n, C.rows.map Cellcounting.Model.Operations.SNat.get, C.cols.map Cellcounting.Model.Operations.SNat.get, C.small.map (fun (e : Cellcounting.Program.Entry) => (e.1, e.2.1, e.2.2.get)), C.nSmall, C.free.map (fun (e : Cellcounting.Program.Entry) => (e.1, e.2.1, e.2.2.get)), C.nFree, C.tree.map (fun (e : Cellcounting.Program.Entry) => (e.1, e.2.1, e.2.2.get)), C.nTree, C.order, C.roots, C.Mf.get, C.d.get, C.B.get, C.H.get, C.Aq.get, C.Hq.get, C.Bq.get) = (I.m, I.n, (List.range I.m).map (Cellcounting.Pseudocode.tRow I), (List.range I.n).map (Cellcounting.Pseudocode.tCol I), Cellcounting.Pseudocode.smallCells I ε δ, Cellcounting.Pseudocode.nSmall I ε δ, (Cellcounting.Pseudocode.forest I ε δ).free, Cellcounting.Pseudocode.nFree I ε δ, (Cellcounting.Pseudocode.forest I ε δ).tree, (Cellcounting.Pseudocode.forest I ε δ).tree.length, Cellcounting.Pseudocode.elimOrder I ε δ, Cellcounting.Pseudocode.roots I ε δ, Cellcounting.Pseudocode.Mf I ε δ, Cellcounting.Pseudocode.dParam I, Cellcounting.Pseudocode.BParam I ε δ, Cellcounting.Pseudocode.HParam I ε δ, (Cellcounting.Pseudocode.AParam I ε δ : ℚ), (Cellcounting.Pseudocode.HParam I ε δ : ℚ), (Cellcounting.Pseudocode.BParam I ε δ : ℚ)) := by
+  exact Analysis.buildCtx_view_of I ε δ _ _ (tighten_view I hfeas) (params_view I ε δ)
+
+/-- The program's chain and phase parameters, initial multipliers w⁽⁰⁾ (closed form of lem:initialization) and C(0) equal the pseudocode's values. -/
+theorem chainSetup_view (I : Cellcounting.Instance) (ε δ : ℚ) (C : Cellcounting.Program.Ctx) (hC : (C.m, C.n, C.rows.map Cellcounting.Model.Operations.SNat.get, C.cols.map Cellcounting.Model.Operations.SNat.get, C.small.map (fun (e : Cellcounting.Program.Entry) => (e.1, e.2.1, e.2.2.get)), C.nSmall, C.free.map (fun (e : Cellcounting.Program.Entry) => (e.1, e.2.1, e.2.2.get)), C.nFree, C.tree.map (fun (e : Cellcounting.Program.Entry) => (e.1, e.2.1, e.2.2.get)), C.nTree, C.order, C.roots, C.Mf.get, C.d.get, C.B.get, C.H.get, C.Aq.get, C.Hq.get, C.Bq.get) = (I.m, I.n, (List.range I.m).map (Cellcounting.Pseudocode.tRow I), (List.range I.n).map (Cellcounting.Pseudocode.tCol I), Cellcounting.Pseudocode.smallCells I ε δ, Cellcounting.Pseudocode.nSmall I ε δ, (Cellcounting.Pseudocode.forest I ε δ).free, Cellcounting.Pseudocode.nFree I ε δ, (Cellcounting.Pseudocode.forest I ε δ).tree, (Cellcounting.Pseudocode.forest I ε δ).tree.length, Cellcounting.Pseudocode.elimOrder I ε δ, Cellcounting.Pseudocode.roots I ε δ, Cellcounting.Pseudocode.Mf I ε δ, Cellcounting.Pseudocode.dParam I, Cellcounting.Pseudocode.BParam I ε δ, Cellcounting.Pseudocode.HParam I ε δ, (Cellcounting.Pseudocode.AParam I ε δ : ℚ), (Cellcounting.Pseudocode.HParam I ε δ : ℚ), (Cellcounting.Pseudocode.BParam I ε δ : ℚ))) (Pm : Cellcounting.Program.Params) (hPm : (Pm.d.get, Pm.K.get, Pm.A.get, Pm.B.get, Pm.W.get, Pm.H.get) = (Cellcounting.Pseudocode.dParam I, Cellcounting.Pseudocode.KParam I ε δ, Cellcounting.Pseudocode.AParam I ε δ, Cellcounting.Pseudocode.BParam I ε δ, Cellcounting.Pseudocode.WParam I ε δ, Cellcounting.Pseudocode.HParam I ε δ)) (pS : Cellcounting.Model.Operations.SNat) (hp : pS.get = Cellcounting.Pseudocode.pSmall I ε δ) (εS : Cellcounting.Model.Operations.SRat) (hε : εS.get = ε) : let r := (Cellcounting.Program.chainSetup C Pm pS εS).val; ((r.1.p, r.1.pS.get, r.1.nsm, r.1.pairCell, r.1.cellFirst, r.1.smallB.map Cellcounting.Model.Operations.SNat.get, r.1.ξ.get, r.1.kAcc, r.1.kAccS.get), (r.2.1.τ.get, r.2.1.Bret.get, r.2.1.BretN, r.2.1.Nav.get, r.2.1.NavN, r.2.1.Hn), (fun (i l : ℕ) => ((r.2.2.1.getD i []).getD l default).get), (r.2.2.1.length, r.2.2.1.map List.length), r.2.2.2.get) = ((Cellcounting.Pseudocode.pSmall I ε δ, Cellcounting.Pseudocode.pSmall I ε δ, Cellcounting.Pseudocode.nSmall I ε δ, Cellcounting.Pseudocode.pairCells I ε δ, (List.range (Cellcounting.Pseudocode.nSmall I ε δ)).map (Cellcounting.Pseudocode.cellFirst I ε δ), (List.range (Cellcounting.Pseudocode.nSmall I ε δ)).map (Cellcounting.Pseudocode.smallB I ε δ), Cellcounting.Pseudocode.ξParam I ε δ, Cellcounting.Pseudocode.kAccParam I ε δ, Cellcounting.Pseudocode.kAccParam I ε δ), (Cellcounting.Pseudocode.τParam I ε δ, Cellcounting.Pseudocode.BretParam I ε δ, Cellcounting.Pseudocode.BretParam I ε δ, Cellcounting.Pseudocode.NavParam I ε δ, Cellcounting.Pseudocode.NavParam I ε δ, Cellcounting.Pseudocode.HParam I ε δ), Cellcounting.Pseudocode.w0 I ε δ, (Cellcounting.Pseudocode.pSmall I ε δ, List.replicate (Cellcounting.Pseudocode.pSmall I ε δ) (Cellcounting.Pseudocode.pSmall I ε δ)), Cellcounting.Pseudocode.C0 I ε δ) := by
+  exact Analysis.chainSetup_view_of I ε δ C hC Pm hPm pS hp εS hε
 
 /-- Unfolds the output law in Model/Run: it is the pushforward of a uniform finite coin tape through the program's estimate. -/
 theorem output_eq_map_estimate (I : Cellcounting.Instance) (ε δ : ℚ) : Cellcounting.output I ε δ = (Cellcounting.tapeHeads (Cellcounting.tapeLength I ε δ)).map (fun (s : Finset ℕ) => Cellcounting.Interface.estimate I ε δ (Arlib.Computation.Coins.ofFinset s)) := by
@@ -1026,6 +1376,9 @@ end Cellcounting
 /-! ### Run record
 Newest first. History, not instruction — what this file claims is above.
 
+* r7 · proved · `tighten_view` from new `Analysis.cellMin_val`/`cellMax_val` (proved); `params_view` outright; `feasible_val` proof moved to `Analysis/FeasibleValProof.lean`
+* r7 · proved · `orderStat_val` outright (insertion sort values are the sorted multiset)
+* r7 · proved · `feasible_val` from `Analysis.network_val` (proved), `Analysis.maxFlow_correct` and `Analysis.transport_flow_iff` (open children); Edmonds–Karp count isolated as `Analysis.edmondsKarp_bound` (cited, EK1972)
 * r6 · proved · `output_eq_map_estimate` (map composition), `estimate_infeasible` (from `feasible_val`)
 * r6 · proved · `estimate_feasible_law` directly (not via `output_eq_map_estimate`, which `output_eq_fpras` already combines with it); cursor ≤ flips paid via new `Analysis/CursorFlips.lean`
 * r5 · proved · `dyadicDraw_tape` from `uniformBits_tape` via `tapeLaw_map` and `size_pred_eq_clog`; `uniformBits_tape` outright via `Analysis.bitsVal_tape` (new `Analysis/UniformBitsTape.lean`)
