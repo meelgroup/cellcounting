@@ -38,7 +38,7 @@ theorem profile_le_smallB (I : Instance) (ε δ : ℚ) (S : Finset ℕ) :
   exact ⟨hblock _, hblock _⟩
 
 /-- INTERNAL: `Pseudocode.penalty` is nonnegative, unconditionally. -/
-theorem penalty_nonneg (I : Instance) (ε δ : ℚ) (x y : ℕ → ℕ) (z : ℕ → ℚ) :
+theorem pseudocode_penalty_nonneg (I : Instance) (ε δ : ℚ) (x y : ℕ → ℕ) (z : ℕ → ℚ) :
     0 ≤ penalty I ε δ x y z := by
   unfold penalty
   apply mul_nonneg (by positivity)
@@ -93,7 +93,7 @@ theorem hWeight_adjacent (I : Instance) (ε δ : ℚ) (hε : 0 < ε) (hfeas : fe
         (2 : ℝ) ^ (-(penalty I ε δ x y (extendQ z) : ℝ) / (HParam I ε δ : ℝ)) ≤ 1 := by
     intro z hz
     have hz' := extendQ_mem_extended I ε δ z hz
-    have hDnn := penalty_nonneg I ε δ x y (extendQ z)
+    have hDnn := pseudocode_penalty_nonneg I ε δ x y (extendQ z)
     have hDle := pseudo_penalty_le_H I ε δ hε hfeas x y (extendQ z) hxy hz'
     have hDleR : (penalty I ε δ x y (extendQ z) : ℝ) ≤ (HParam I ε δ : ℝ) := by
       exact_mod_cast hDle

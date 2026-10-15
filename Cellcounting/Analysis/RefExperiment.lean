@@ -196,4 +196,48 @@ def goodMult (I : Instance) (ε δ : ℚ) (j : ℕ) (w : ℕ → ℕ → ℚ) : 
     Cpart I ε δ j / (4 * cDef I ε δ j i l) ≤ (w i l : ℝ) ∧
       (w i l : ℝ) ≤ 4 * Cpart I ε δ j / cDef I ε δ j i l
 
+/-- INTERNAL: a list product read through `getD`. -/
+theorem prod_range_getD_eq {α : Type*} (l : List α) (g : α → ℕ) (d : α) :
+    ∏ i ∈ Finset.range l.length, g (l.getD i d) = (l.map g).prod := by
+  induction l with
+  | nil => simp
+  | cons a l ih =>
+    rw [List.length_cons, Finset.prod_range_succ']
+    simp only [List.getD_cons_succ, List.getD_cons_zero]
+    rw [ih, List.map_cons, List.prod_cons, mul_comm]
+
+/-- INTERNAL: the free box has `M_f` points.
+TEXLINE: sections/algorithm.tex:94-133 -/
+theorem card_freeBox (I : Instance) (ε δ : ℚ) : (freeBox I ε δ).card = Mf I ε δ := by
+  unfold freeBox
+  rw [Fintype.card_piFinset]
+  simp only [Finset.card_range]
+  rw [Fin.prod_univ_eq_prod_range (fun k => (freeAt I ε δ k).2.2 + 1) (nFree I ε δ)]
+  unfold nFree freeAt Mf
+  exact prod_range_getD_eq _ (fun e => e.2.2 + 1) (0, 0, 0)
+
+/-- INTERNAL: `C(0) = M_f ∏_s (b_s + 1)`: at parameter zero every term of `h_0` is one.
+TEXLINE: sections/algorithm.tex:94-133 -/
+theorem Cpart_zero (I : Instance) (ε δ : ℚ) : Cpart I ε δ 0 = (C0 I ε δ : ℝ) := by
+  have hh : ∀ x y, hWeight I ε δ 0 x y = (Mf I ε δ : ℝ) := by
+    intro x y
+    simp [hWeight, card_freeBox]
+  simp only [Cpart, hh, Finset.sum_const, nsmul_eq_mul, C0]
+  have hsmall : (smallBox I ε δ).card =
+      ∏ k ∈ Finset.range (nSmall I ε δ), (smallB I ε δ k + 1) := by
+    unfold smallBox
+    rw [Fintype.card_piFinset]
+    simp only [Finset.card_range]
+    exact Fin.prod_univ_eq_prod_range (fun k => smallB I ε δ k + 1) (nSmall I ε δ)
+  rw [hsmall]
+  push_cast
+  ring
+
+/-- INTERNAL: every `C(j)` is positive (both boxes are nonempty, every term positive).
+TEXLINE: sections/scales.tex:279-282 -/
+theorem Cpart_pos (I : Instance) (ε δ : ℚ) (j : ℕ) : 0 < Cpart I ε δ j := by
+  have hS : (smallBox I ε δ).Nonempty := ⟨fun _ => 0, by simp [smallBox]⟩
+  have hF : (freeBox I ε δ).Nonempty := ⟨fun _ => 0, by simp [freeBox]⟩
+  refine Finset.sum_pos (fun x _ => Finset.sum_pos (fun z _ => by positivity) hF) hS
+
 end Cellcounting.Analysis
