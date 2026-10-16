@@ -20,6 +20,8 @@ import Cellcounting.Analysis.FeasibleValProof
 import Cellcounting.Analysis.CellMinVal
 import Cellcounting.Analysis.CellMaxVal
 import Cellcounting.Analysis.Mu0InnerVal
+import Cellcounting.Analysis.KindVal
+import Cellcounting.Analysis.ProfileVal
 
 /-!
 # The program and the model are the same algorithm
@@ -81,6 +83,12 @@ are a sorted permutation, hence the sorted multiset of `Pseudocode.orderStat`.
 (`Analysis/CellMinVal.lean`, `Analysis/CellMaxVal.lean`: the binary searches return
 `cellLow`/`cellHigh`, through the flow test on modified bounds) and a loop invariant over the
 row/column double loop of `Program.tighten` (`tightenBody`, `TInv` inside the proof).
+`observe_tape` is proved from `step_tape` and `oracle_tape`, by induction over the `N_av - 1`
+rounds after the first observation.  Each state is read through `Analysis.kind_val` and
+`Analysis.profile_val` (`Analysis/KindVal.lean`, `Analysis/ProfileVal.lean`): the program's
+`kind` and `profile` are the pseudocode ones of the viewed state.  The loop invariant is that
+the state has `2p` bits (`obs_step_length`) and the count table is `p × p` (`obsShape`), so
+`Program.set2` updates exactly the counted defect class (`obs_set2_view`, `obs_kind_defect`).
 Every other rung is still `sorry`.
 -/
 
@@ -757,9 +765,318 @@ theorem mu0_tape (I : Cellcounting.Instance) (ε δ : ℚ) (K : Cellcounting.Pro
 theorem restart_tape (I : Cellcounting.Instance) (ε δ : ℚ) (C : Cellcounting.Program.Ctx) (hC : (C.m, C.n, C.rows.map Cellcounting.Model.Operations.SNat.get, C.cols.map Cellcounting.Model.Operations.SNat.get, C.small.map (fun (e : Cellcounting.Program.Entry) => (e.1, e.2.1, e.2.2.get)), C.nSmall, C.free.map (fun (e : Cellcounting.Program.Entry) => (e.1, e.2.1, e.2.2.get)), C.nFree, C.tree.map (fun (e : Cellcounting.Program.Entry) => (e.1, e.2.1, e.2.2.get)), C.nTree, C.order, C.roots, C.Mf.get, C.d.get, C.B.get, C.H.get, C.Aq.get, C.Hq.get, C.Bq.get) = (I.m, I.n, (List.range I.m).map (Cellcounting.Pseudocode.tRow I), (List.range I.n).map (Cellcounting.Pseudocode.tCol I), Cellcounting.Pseudocode.smallCells I ε δ, Cellcounting.Pseudocode.nSmall I ε δ, (Cellcounting.Pseudocode.forest I ε δ).free, Cellcounting.Pseudocode.nFree I ε δ, (Cellcounting.Pseudocode.forest I ε δ).tree, (Cellcounting.Pseudocode.forest I ε δ).tree.length, Cellcounting.Pseudocode.elimOrder I ε δ, Cellcounting.Pseudocode.roots I ε δ, Cellcounting.Pseudocode.Mf I ε δ, Cellcounting.Pseudocode.dParam I, Cellcounting.Pseudocode.BParam I ε δ, Cellcounting.Pseudocode.HParam I ε δ, (Cellcounting.Pseudocode.AParam I ε δ : ℚ), (Cellcounting.Pseudocode.HParam I ε δ : ℚ), (Cellcounting.Pseudocode.BParam I ε δ : ℚ))) (K : Cellcounting.Program.Chain) (hK : (K.p, K.pS.get, K.nsm, K.pairCell, K.cellFirst, K.smallB.map Cellcounting.Model.Operations.SNat.get, K.ξ.get, K.kAcc, K.kAccS.get) = (Cellcounting.Pseudocode.pSmall I ε δ, Cellcounting.Pseudocode.pSmall I ε δ, Cellcounting.Pseudocode.nSmall I ε δ, Cellcounting.Pseudocode.pairCells I ε δ, (List.range (Cellcounting.Pseudocode.nSmall I ε δ)).map (Cellcounting.Pseudocode.cellFirst I ε δ), (List.range (Cellcounting.Pseudocode.nSmall I ε δ)).map (Cellcounting.Pseudocode.smallB I ε δ), Cellcounting.Pseudocode.ξParam I ε δ, Cellcounting.Pseudocode.kAccParam I ε δ, Cellcounting.Pseudocode.kAccParam I ε δ)) (Ph : Cellcounting.Program.Phase) (hPh : (Ph.τ.get, Ph.Bret.get, Ph.BretN, Ph.Nav.get, Ph.NavN, Ph.Hn) = (Cellcounting.Pseudocode.τParam I ε δ, Cellcounting.Pseudocode.BretParam I ε δ, Cellcounting.Pseudocode.BretParam I ε δ, Cellcounting.Pseudocode.NavParam I ε δ, Cellcounting.Pseudocode.NavParam I ε δ, Cellcounting.Pseudocode.HParam I ε δ)) (ws : List (List (List Cellcounting.Model.Operations.SRat))) (j : ℕ) (S0 : List Bool) (hS : S0.length = 2 * Cellcounting.Pseudocode.pSmall I ε δ) (cur n T : ℕ) (hT : ∀ s : Finset ℕ, (Cellcounting.Program.restart C K (Arlib.Computation.Coins.ofFinset s) Ph ws j S0 cur).val.cur + n ≤ T) : (Cellcounting.tapeHeads T).map (fun (s : Finset ℕ) => let r := (Cellcounting.Program.restart C K (Arlib.Computation.Coins.ofFinset s) Ph ws j S0 cur).val; ((⟨(Finset.range (2 * Cellcounting.Pseudocode.pSmall I ε δ)).filter (fun e => r.S.getD e false = true), r.stage, r.hits.get, r.used.get, r.finished, r.aborted⟩ : Cellcounting.Pseudocode.Restart), ((s.filter (fun i => r.cur ≤ i)).image (fun i => i - r.cur)).filter (fun i => i < n))) = (Cellcounting.Pseudocode.restart I ε δ (fun (a i l : ℕ) => (((ws.getD a []).getD i []).getD l default).get) j ((Finset.range (2 * Cellcounting.Pseudocode.pSmall I ε δ)).filter (fun e => S0.getD e false = true))).bind (fun z => (Cellcounting.tapeHeads n).map (fun s' => (z, s'))) := by
   sorry
 
+section ObserveTape
+
+open Arlib.Computation Cellcounting.Program Cellcounting.Model.Operations Cellcounting.Analysis
+
+/-- INTERNAL: a `p × p` table of type counts `n_il`. TEXLINE: sections/algorithm.tex:259-383 -/
+def obsShape (p : ℕ) (M : List (List SNat)) : Prop := M.length = p ∧ ∀ row ∈ M, row.length = p
+
+/-- INTERNAL: the value of `Program.set2` on a count table. -/
+theorem obs_set2_val (M : List (List SNat)) (i l : ℕ) (a : SNat) :
+    (Program.set2 M i l a).val = M.set i ((M.getD i []).set l a) := by
+  simp [Program.set2]; rfl
+
+/-- INTERNAL: overwriting one count keeps a `p × p` table. -/
+theorem obs_set2_shape (p : ℕ) (M : List (List SNat)) (i l : ℕ) (a : SNat) (h : obsShape p M) :
+    obsShape p (Program.set2 M i l a).val := by
+  rw [obs_set2_val]
+  refine ⟨by rw [List.length_set]; exact h.1, fun row hrow => ?_⟩
+  by_cases hu : i < M.length
+  · rcases List.mem_or_eq_of_mem_set hrow with hm | rfl
+    · exact h.2 row hm
+    · rw [List.length_set, List.getD_eq_getElem?_getD, List.getElem?_eq_getElem hu, Option.getD_some]
+      exact h.2 _ (List.getElem_mem hu)
+  · rw [List.set_eq_of_length_le (by omega)] at hrow
+    exact h.2 row hrow
+
+/-- INTERNAL: inside a `p × p` table, `Program.set2` overwrites exactly entry `(i, l)` of the
+viewed count function. -/
+theorem obs_set2_view (p : ℕ) (M : List (List SNat)) (i l : ℕ) (a : SNat) (h : obsShape p M)
+    (hi : i < p) (hl : l < p) :
+    (fun u v => (((Program.set2 M i l a).val.getD u []).getD v default).get) =
+      fun u v => if u = i ∧ v = l then a.get else ((M.getD u []).getD v default).get := by
+  rw [obs_set2_val]
+  funext u v
+  have hiM : i < M.length := h.1 ▸ hi
+  by_cases hu : u = i
+  · subst hu
+    have hrow : l < (M.getD u []).length := by
+      rw [List.getD_eq_getElem?_getD, List.getElem?_eq_getElem hiM, Option.getD_some]
+      rw [h.2 _ (List.getElem_mem hiM)]; exact hl
+    simp only [List.getD_eq_getElem?_getD] at hrow ⊢
+    by_cases hv : v = l
+    · subst hv
+      simp only [List.getElem?_eq_getElem hiM, Option.getD_some] at hrow
+      simp [List.getElem?_set, hiM, hrow]
+    · simp [List.getElem?_set, hiM, hv, Ne.symm hv]
+  · simp [hu, List.getD_eq_getElem?_getD, Ne.symm hu]
+
+/-- INTERNAL: the value of `Program.get2` on a count table. -/
+theorem obs_get2_val (M : List (List SNat)) (i l : ℕ) :
+    (Program.get2 M i l).val = (M.getD i []).getD l default := by
+  simp [Program.get2]; rfl
+
+/-- INTERNAL: the labels of a defect class `A_il` are pairs, `i, l < p`. TEXLINE: sections/signatures.tex:13-41 -/
+theorem obs_kind_defect (I : Instance) (ε δ : ℚ) (S : Finset ℕ) (i l : ℕ)
+    (h : Pseudocode.kind I ε δ S = .defect i l) : i < Pseudocode.pSmall I ε δ ∧ l < Pseudocode.pSmall I ε δ := by
+  unfold Pseudocode.kind at h
+  simp only at h
+  split_ifs at h with h1 h2 h3
+  obtain ⟨hE, hF⟩ := h3
+  obtain ⟨a, ha⟩ := Finset.card_eq_one.1 hE
+  obtain ⟨b, hb⟩ := Finset.card_eq_one.1 hF
+  rw [ha, hb] at h
+  simp only [Finset.sup_singleton, id, Program.Kind.defect.injEq] at h
+  rw [← h.1, ← h.2]
+  have hai : a ∈ (Finset.range (Pseudocode.pSmall I ε δ)).filter fun i => 2 * i ∉ S ∧ 2 * i + 1 ∉ S := by
+    rw [ha]; exact Finset.mem_singleton_self _
+  have hbl : b ∈ (Finset.range (Pseudocode.pSmall I ε δ)).filter fun i => 2 * i ∈ S ∧ 2 * i + 1 ∈ S := by
+    rw [hb]; exact Finset.mem_singleton_self _
+  exact ⟨Finset.mem_range.1 (Finset.mem_filter.1 hai).1, Finset.mem_range.1 (Finset.mem_filter.1 hbl).1⟩
+
+/-- INTERNAL: one implemented transition keeps the number of membership bits. -/
+theorem obs_step_length (C : Ctx) (K : Chain) (tape : Coins ℕ) (a : ℕ) (w : List (List SRat))
+    (S : List Bool) (cur : ℕ) : (Program.step C K tape a w S cur).val.1.length = S.length := by
+  simp only [Program.step, Charged.val_bind]
+  split
+  · rfl
+  · simp only [Charged.val_bind]
+    split
+    · rfl
+    · simp only [Charged.val_bind]
+      split
+      all_goals
+        simp only [Charged.val_bind]
+        split <;> simp [List.length_set]
+
+end ObserveTape
+
+open Arlib.Computation Cellcounting.Program Cellcounting.Model.Operations Cellcounting.Analysis in
 /-- The N_av observation steps of a phase, which accumulate the type counts and G_j, have the pseudocode observation law. -/
 theorem observe_tape (I : Cellcounting.Instance) (ε δ : ℚ) (C : Cellcounting.Program.Ctx) (hC : (C.m, C.n, C.rows.map Cellcounting.Model.Operations.SNat.get, C.cols.map Cellcounting.Model.Operations.SNat.get, C.small.map (fun (e : Cellcounting.Program.Entry) => (e.1, e.2.1, e.2.2.get)), C.nSmall, C.free.map (fun (e : Cellcounting.Program.Entry) => (e.1, e.2.1, e.2.2.get)), C.nFree, C.tree.map (fun (e : Cellcounting.Program.Entry) => (e.1, e.2.1, e.2.2.get)), C.nTree, C.order, C.roots, C.Mf.get, C.d.get, C.B.get, C.H.get, C.Aq.get, C.Hq.get, C.Bq.get) = (I.m, I.n, (List.range I.m).map (Cellcounting.Pseudocode.tRow I), (List.range I.n).map (Cellcounting.Pseudocode.tCol I), Cellcounting.Pseudocode.smallCells I ε δ, Cellcounting.Pseudocode.nSmall I ε δ, (Cellcounting.Pseudocode.forest I ε δ).free, Cellcounting.Pseudocode.nFree I ε δ, (Cellcounting.Pseudocode.forest I ε δ).tree, (Cellcounting.Pseudocode.forest I ε δ).tree.length, Cellcounting.Pseudocode.elimOrder I ε δ, Cellcounting.Pseudocode.roots I ε δ, Cellcounting.Pseudocode.Mf I ε δ, Cellcounting.Pseudocode.dParam I, Cellcounting.Pseudocode.BParam I ε δ, Cellcounting.Pseudocode.HParam I ε δ, (Cellcounting.Pseudocode.AParam I ε δ : ℚ), (Cellcounting.Pseudocode.HParam I ε δ : ℚ), (Cellcounting.Pseudocode.BParam I ε δ : ℚ))) (K : Cellcounting.Program.Chain) (hK : (K.p, K.pS.get, K.nsm, K.pairCell, K.cellFirst, K.smallB.map Cellcounting.Model.Operations.SNat.get, K.ξ.get, K.kAcc, K.kAccS.get) = (Cellcounting.Pseudocode.pSmall I ε δ, Cellcounting.Pseudocode.pSmall I ε δ, Cellcounting.Pseudocode.nSmall I ε δ, Cellcounting.Pseudocode.pairCells I ε δ, (List.range (Cellcounting.Pseudocode.nSmall I ε δ)).map (Cellcounting.Pseudocode.cellFirst I ε δ), (List.range (Cellcounting.Pseudocode.nSmall I ε δ)).map (Cellcounting.Pseudocode.smallB I ε δ), Cellcounting.Pseudocode.ξParam I ε δ, Cellcounting.Pseudocode.kAccParam I ε δ, Cellcounting.Pseudocode.kAccParam I ε δ)) (Ph : Cellcounting.Program.Phase) (hPh : (Ph.τ.get, Ph.Bret.get, Ph.BretN, Ph.Nav.get, Ph.NavN, Ph.Hn) = (Cellcounting.Pseudocode.τParam I ε δ, Cellcounting.Pseudocode.BretParam I ε δ, Cellcounting.Pseudocode.BretParam I ε δ, Cellcounting.Pseudocode.NavParam I ε δ, Cellcounting.Pseudocode.NavParam I ε δ, Cellcounting.Pseudocode.HParam I ε δ)) (j : ℕ) (w : List (List Cellcounting.Model.Operations.SRat)) (S0 : List Bool) (hS : S0.length = 2 * Cellcounting.Pseudocode.pSmall I ε δ) (cur n T : ℕ) (hT : ∀ s : Finset ℕ, (Cellcounting.Program.observe C K (Arlib.Computation.Coins.ofFinset s) Ph j w S0 cur).val.cur + n ≤ T) : (Cellcounting.tapeHeads T).map (fun (s : Finset ℕ) => let r := (Cellcounting.Program.observe C K (Arlib.Computation.Coins.ofFinset s) Ph j w S0 cur).val; ((⟨(Finset.range (2 * Cellcounting.Pseudocode.pSmall I ε δ)).filter (fun e => r.S.getD e false = true), r.n0.get, fun (i l : ℕ) => ((r.nT.getD i []).getD l default).get, r.sumG.get⟩ : Cellcounting.Pseudocode.Obs), ((s.filter (fun i => r.cur ≤ i)).image (fun i => i - r.cur)).filter (fun i => i < n))) = (Cellcounting.Pseudocode.observe I ε δ j (fun (i l : ℕ) => ((w.getD i []).getD l default).get) ((Finset.range (2 * Cellcounting.Pseudocode.pSmall I ε δ)).filter (fun e => S0.getD e false = true))).bind (fun z => (Cellcounting.tapeHeads n).map (fun s' => (z, s'))) := by
-  sorry
+  -- each observed state is read through `Analysis.kind_val` and `Analysis.profile_val`;
+  -- the transition is `step_tape`, the two weight evaluations are `oracle_tape`, and
+  -- `Analysis.tapeLaw_bind` chains them along the windows of `Analysis/PhaseWindow.lean`
+  have hK0 := hK
+  simp only [Prod.mk.injEq] at hK0
+  obtain ⟨hp, -, hnsm, hpc, -, -, hξ, -, -⟩ := hK0
+  have hPh0 := hPh
+  simp only [Prod.mk.injEq] at hPh0
+  obtain ⟨-, -, -, -, hNav, -⟩ := hPh0
+  let v : Program.Obs → Pseudocode.Obs := fun r =>
+    ⟨(Finset.range (2 * Pseudocode.pSmall I ε δ)).filter (fun e => r.S.getD e false = true), r.n0.get,
+      fun i l => ((r.nT.getD i []).getD l default).get, r.sumG.get⟩
+  let Inv : Program.Obs → Prop := fun r =>
+    r.S.length = 2 * Pseudocode.pSmall I ε δ ∧ obsShape (Pseudocode.pSmall I ε δ) r.nT
+  -- observing one state
+  have hOS : ∀ st : Program.Obs, Inv st →
+      Analysis.Window st.cur Program.Obs.cur
+        (fun s => (Program.observeState C K (Coins.ofFinset s) j st).val) ∧
+      (∀ s, Inv (Program.observeState C K (Coins.ofFinset s) j st).val) ∧
+      Analysis.TapeLaw Program.Obs.cur v
+        (fun s => (Program.observeState C K (Coins.ofFinset s) j st).val)
+        (Pseudocode.observeState I ε δ j (v st)) := by
+    intro st hst
+    refine ⟨Analysis.observeState_window C K j st, ?_⟩
+    have hk := Analysis.kind_val I ε δ K hp st.S
+    cases hks : (Program.kind K st.S).val with
+    | transversal =>
+      have hk' : Pseudocode.kind I ε δ (v st).S = .transversal := hk.symm.trans hks
+      let x := (Program.profile K st.S).val.1
+      let y := (Program.profile K st.S).val.2
+      let g₁ : Finset ℕ → SRat × ℕ := fun s =>
+        (Program.oracle C (Coins.ofFinset s) x y (j + 1) K.ξ K.ξ st.cur).val
+      let fin : SRat × ℕ → SRat × ℕ → Program.Obs := fun r1 r2 =>
+        ⟨st.S, (SNat.add st.n0 (SNat.lit 1).val).val, st.nT,
+          (SRat.add st.sumG (SRat.div r1.1 r2.1).val).val, r2.2⟩
+      let g₂ : SRat × ℕ → Finset ℕ → Program.Obs := fun r1 s =>
+        fin r1 (Program.oracle C (Coins.ofFinset s) x y j K.ξ K.ξ r1.2).val
+      have hval : (fun s => (Program.observeState C K (Coins.ofFinset s) j st).val) =
+          fun s => g₂ (g₁ s) s := by
+        funext s
+        simp only [Program.observeState, Charged.val_bind, hks]
+        rfl
+      have hval' : ∀ s, (Program.observeState C K (Coins.ofFinset s) j st).val = g₂ (g₁ s) s :=
+        fun s => congrFun hval s
+      refine ⟨fun s => by rw [hval' s]; exact hst, ?_⟩
+      rw [hval]
+      have hxy := Analysis.profile_val I ε δ K hp hnsm hpc st.S
+      have hl₁ : Analysis.TapeLaw Prod.snd (fun r : SRat × ℕ => r.1.get) g₁
+          (Pseudocode.oracle I ε δ (Pseudocode.profile I ε δ (v st).S).1
+            (Pseudocode.profile I ε δ (v st).S).2 (j + 1) (Pseudocode.ξParam I ε δ)
+            (Pseudocode.ξParam I ε δ)) := by
+        intro n T hT
+        have h := oracle_tape I ε δ C hC x y (j + 1) K.ξ K.ξ st.cur n T hT
+        rw [hxy.1, hxy.2, hξ] at h
+        exact h
+      have hl₂ : ∀ r1 : SRat × ℕ, Analysis.TapeLaw Program.Obs.cur v (g₂ r1)
+          ((Pseudocode.oracle I ε δ (Pseudocode.profile I ε δ (v st).S).1
+            (Pseudocode.profile I ε δ (v st).S).2 j (Pseudocode.ξParam I ε δ)
+            (Pseudocode.ξParam I ε δ)).map fun hCur =>
+              { v st with n0 := (v st).n0 + 1, sumG := (v st).sumG + r1.1.get / hCur }) := by
+        intro r1
+        have h : Analysis.TapeLaw Prod.snd (fun r : SRat × ℕ => r.1.get)
+            (fun s => (Program.oracle C (Coins.ofFinset s) x y j K.ξ K.ξ r1.2).val)
+            (Pseudocode.oracle I ε δ (Pseudocode.profile I ε δ (v st).S).1
+              (Pseudocode.profile I ε δ (v st).S).2 j (Pseudocode.ξParam I ε δ)
+              (Pseudocode.ξParam I ε δ)) := by
+          intro n T hT
+          have h := oracle_tape I ε δ C hC x y j K.ξ K.ξ r1.2 n T hT
+          rw [hxy.1, hxy.2, hξ] at h
+          exact h
+        exact Analysis.tapeLaw_map (fin r1) _ (fun _ => rfl) (fun _ => rfl) h
+      have hlaw := Analysis.tapeLaw_bind (g₁ := g₁) (g₂ := g₂) (v₁ := fun r : SRat × ℕ => r.1.get)
+        (v₂ := v) (π₁ := Prod.snd) (π₂ := Program.Obs.cur)
+        (G₂ := fun hN => (Pseudocode.oracle I ε δ (Pseudocode.profile I ε δ (v st).S).1
+            (Pseudocode.profile I ε δ (v st).S).2 j (Pseudocode.ξParam I ε δ)
+            (Pseudocode.ξParam I ε δ)).map fun hCur =>
+              { v st with n0 := (v st).n0 + 1, sumG := (v st).sumG + hN / hCur }) (fun _ => True)
+        (Analysis.oracle_window C x y (j + 1) K.ξ K.ξ st.cur) (fun _ => trivial)
+        (fun r1 _ => Analysis.window_map (fin r1) (fun _ => rfl)
+          (Analysis.oracle_window C x y j K.ξ K.ξ r1.2))
+        hl₁ (fun r1 _ => hl₂ r1)
+      have hps : Pseudocode.observeState I ε δ j (v st) =
+          (Pseudocode.oracle I ε δ (Pseudocode.profile I ε δ (v st).S).1
+            (Pseudocode.profile I ε δ (v st).S).2 (j + 1) (Pseudocode.ξParam I ε δ)
+            (Pseudocode.ξParam I ε δ)).bind fun hN =>
+          ((Pseudocode.oracle I ε δ (Pseudocode.profile I ε δ (v st).S).1
+            (Pseudocode.profile I ε δ (v st).S).2 j (Pseudocode.ξParam I ε δ)
+            (Pseudocode.ξParam I ε δ)).map fun hCur =>
+              { v st with n0 := (v st).n0 + 1, sumG := (v st).sumG + hN / hCur }) := by
+        unfold Pseudocode.observeState; rw [hk']; rfl
+      rw [hps]
+      exact hlaw
+    | defect i l =>
+      have hk' : Pseudocode.kind I ε δ (v st).S = .defect i l := hk.symm.trans hks
+      obtain ⟨hi, hl⟩ := obs_kind_defect I ε δ _ i l hk'
+      let a : Program.Obs := ⟨st.S, st.n0,
+        (Program.set2 st.nT i l (SNat.add (Program.get2 st.nT i l).val (SNat.lit 1).val).val).val,
+        st.sumG, st.cur⟩
+      have hval : (fun s => (Program.observeState C K (Coins.ofFinset s) j st).val) = fun _ => a := by
+        funext s
+        simp only [Program.observeState, Charged.val_bind, hks]
+        rfl
+      have hval' : ∀ s, (Program.observeState C K (Coins.ofFinset s) j st).val = a := fun s => congrFun hval s
+      refine ⟨fun s => by rw [hval' s]; exact ⟨hst.1, obs_set2_shape _ _ _ _ _ hst.2⟩, ?_⟩
+      rw [hval]
+      have hva : v a = { v st with nT := fun a b => if a = i ∧ b = l then (v st).nT i l + 1 else (v st).nT a b } := by
+        show (⟨_, _, fun u w => (((Program.set2 st.nT i l _).val.getD u []).getD w default).get, _⟩ : Pseudocode.Obs) = _
+        rw [obs_set2_view _ _ _ _ _ hst.2 hi hl]
+        simp only [Interface.SNat.get_add, Interface.SNat.get_lit, obs_get2_val]
+        rfl
+      have hps : Pseudocode.observeState I ε δ j (v st) = PMF.pure (v a) := by
+        unfold Pseudocode.observeState; rw [hk']; exact congrArg PMF.pure hva.symm
+      rw [hps]
+      exact Analysis.tapeLaw_const Program.Obs.cur v a
+    | outside =>
+      have hval : (fun s => (Program.observeState C K (Coins.ofFinset s) j st).val) = fun _ => st := by
+        funext s
+        simp only [Program.observeState, Charged.val_bind, hks]
+        rfl
+      have hk' : Pseudocode.kind I ε δ (v st).S = .outside := hk.symm.trans hks
+      have hval' : ∀ s, (Program.observeState C K (Coins.ofFinset s) j st).val = st := fun s => congrFun hval s
+      refine ⟨fun s => by rw [hval' s]; exact hst, ?_⟩
+      rw [hval]
+      have hps : Pseudocode.observeState I ε δ j (v st) = PMF.pure (v st) := by
+        unfold Pseudocode.observeState; rw [hk']; rfl
+      rw [hps]
+      exact Analysis.tapeLaw_const Program.Obs.cur v st
+  -- one round of the loop: a transition, then an observation
+  let w' : ℕ → ℕ → ℚ := fun i l => ((w.getD i []).getD l default).get
+  let F : ℕ → Pseudocode.Obs → PMF Pseudocode.Obs := fun _ o => do
+    let S' ← Pseudocode.step I ε δ j w' o.S
+    Pseudocode.observeState I ε δ j { o with S := S' }
+  let body : Program.Obs → Finset ℕ → Program.Obs := fun st s =>
+    (Program.observeState C K (Coins.ofFinset s) j
+      ⟨(Program.step C K (Coins.ofFinset s) j w st.S st.cur).val.1, st.n0, st.nT, st.sumG,
+        (Program.step C K (Coins.ofFinset s) j w st.S st.cur).val.2⟩).val
+  have hbody : ∀ (k : ℕ) (st : Program.Obs), Inv st →
+      Analysis.Window st.cur Program.Obs.cur (body st) ∧ (∀ s, Inv (body st s)) ∧
+      Analysis.TapeLaw Program.Obs.cur v (body st) (F k (v st)) := by
+    intro k st hst
+    let g₂ : List Bool × ℕ → Finset ℕ → Program.Obs := fun r s =>
+      (Program.observeState C K (Coins.ofFinset s) j ⟨r.1, st.n0, st.nT, st.sumG, r.2⟩).val
+    have hP : ∀ s, (Program.step C K (Coins.ofFinset s) j w st.S st.cur).val.1.length =
+        2 * Pseudocode.pSmall I ε δ := fun s => (obs_step_length _ _ _ _ _ _ _).trans hst.1
+    have hw₁ := Analysis.step_window C K j w st.S st.cur
+    have hw₂ : ∀ r : List Bool × ℕ, r.1.length = 2 * Pseudocode.pSmall I ε δ →
+        Analysis.Window r.2 Program.Obs.cur (g₂ r) :=
+      fun r hr => (hOS ⟨r.1, st.n0, st.nT, st.sumG, r.2⟩ ⟨hr, hst.2⟩).1
+    have hl₁ : Analysis.TapeLaw Prod.snd
+        (fun r : List Bool × ℕ => (Finset.range (2 * Pseudocode.pSmall I ε δ)).filter
+          (fun e => r.1.getD e false = true))
+        (fun s => (Program.step C K (Coins.ofFinset s) j w st.S st.cur).val)
+        (Pseudocode.step I ε δ j w' (v st).S) :=
+      fun n T hT => step_tape I ε δ C hC K hK j w st.S hst.1 st.cur n T hT
+    refine ⟨Analysis.window_bind (g₂ := g₂)
+        (fun r : List Bool × ℕ => r.1.length = 2 * Pseudocode.pSmall I ε δ) hw₁ hP hw₂,
+      fun s => (hOS ⟨(Program.step C K (Coins.ofFinset s) j w st.S st.cur).val.1, st.n0, st.nT, st.sumG,
+        (Program.step C K (Coins.ofFinset s) j w st.S st.cur).val.2⟩ ⟨hP s, hst.2⟩).2.1 s, ?_⟩
+    exact Analysis.tapeLaw_bind (g₂ := g₂)
+      (G₂ := fun z => Pseudocode.observeState I ε δ j { v st with S := z })
+      (fun r : List Bool × ℕ => r.1.length = 2 * Pseudocode.pSmall I ε δ) hw₁ hP hw₂ hl₁
+      (fun r hr => (hOS ⟨r.1, st.n0, st.nT, st.sumG, r.2⟩ ⟨hr, hst.2⟩).2.2)
+  -- the loop of rounds
+  let gk : ℕ → Program.Obs → Finset ℕ → Program.Obs := fun k st s =>
+    (List.range k).foldl (fun st' _ => body st' s) st
+  have hloop : ∀ (k : ℕ) (st : Program.Obs), Inv st →
+      Analysis.Window st.cur Program.Obs.cur (gk k st) ∧ (∀ s, Inv (gk k st s)) ∧
+      Analysis.TapeLaw Program.Obs.cur v (gk k st) (Pseudocode.loop F k (v st)) := by
+    intro k
+    induction k with
+    | zero =>
+      intro st hst
+      exact ⟨Analysis.window_const st le_rfl, fun _ => hst, Analysis.tapeLaw_const _ v st⟩
+    | succ k ih =>
+      intro st hst
+      obtain ⟨hw, hP, hl⟩ := ih st hst
+      have hgf : gk (k + 1) st = fun s => body (gk k st s) s := by
+        funext s
+        simp only [gk, List.range_succ, List.foldl_append, List.foldl_cons, List.foldl_nil]
+      have hps : Pseudocode.loop F (k + 1) (v st) = (Pseudocode.loop F k (v st)).bind (F k) := by
+        unfold Pseudocode.loop
+        rw [List.range_succ, List.foldlM_append]
+        simp only [List.foldlM_cons, List.foldlM_nil]
+        show (List.foldlM (fun b i => F i b) (v st) (List.range k)).bind
+          (fun b => (F k b).bind PMF.pure) = _
+        simp only [PMF.bind_pure]
+      rw [hgf, hps]
+      exact ⟨Analysis.window_bind (g₂ := body) Inv hw hP (fun x hx => (hbody k x hx).1),
+        fun s => (hbody k _ (hP s)).2.1 s,
+        Analysis.tapeLaw_bind (g₂ := body) (G₂ := F k) Inv hw hP (fun x hx => (hbody k x hx).1) hl
+          (fun x hx => (hbody k x hx).2.2)⟩
+  -- the initial observation, then the loop
+  let st0 : Program.Obs := ⟨S0, (SNat.lit 0).val,
+    (Model.Operations.replicate K.p (Model.Operations.replicate K.p (SNat.lit 0).val).val).val, (SRat.lit 0).val, cur⟩
+  have hinv0 : Inv st0 := by
+    refine ⟨hS, show _ ∧ _ from ⟨?_, ?_⟩⟩
+    · simp [st0, hp]
+    · intro row hrow
+      simp only [st0, Interface.val_replicate] at hrow
+      rw [List.eq_of_mem_replicate hrow]
+      simp [hp]
+  have hv0 : v st0 = ⟨(Finset.range (2 * Pseudocode.pSmall I ε δ)).filter
+      (fun e => S0.getD e false = true), 0, fun _ _ => 0, 0⟩ := by
+    show (⟨_, 0, fun i l => _, 0⟩ : Pseudocode.Obs) = _
+    congr 1
+    funext i l
+    show (((Model.Operations.replicate K.p (Model.Operations.replicate K.p (SNat.lit 0).val).val).val.getD
+      i []).getD l default).get = 0
+    simp only [Interface.val_replicate, List.getD_eq_getElem?_getD]
+    by_cases hi : i < K.p <;> by_cases hl : l < K.p <;> simp [hi, hl, List.getElem?_replicate]
+  have hobs : (fun s => (Program.observe C K (Coins.ofFinset s) Ph j w S0 cur).val) =
+      fun s => gk (Ph.NavN - 1) ((Program.observeState C K (Coins.ofFinset s) j st0).val) s := by
+    funext s
+    simp only [Program.observe, Charged.val_bind, Analysis.val_repeatFor']
+    rfl
+  have hlaw := Analysis.tapeLaw_bind
+    (g₁ := fun s => (Program.observeState C K (Coins.ofFinset s) j st0).val)
+    (g₂ := gk (Ph.NavN - 1)) (G₂ := Pseudocode.loop F (Ph.NavN - 1)) Inv
+    (hOS st0 hinv0).1 (hOS st0 hinv0).2.1 (fun x hx => (hloop _ x hx).1) (hOS st0 hinv0).2.2
+    (fun x hx => (hloop _ x hx).2.2)
+  rw [← hobs, hv0, hNav] at hlaw
+  exact hlaw n T hT
 
 /-- One annealing phase (initial draw, restart, observations, multiplier update eq:alg-multiplier-update, ratio product) has the pseudocode phase law. -/
 theorem phase_tape (I : Cellcounting.Instance) (ε δ : ℚ) (C : Cellcounting.Program.Ctx) (hC : (C.m, C.n, C.rows.map Cellcounting.Model.Operations.SNat.get, C.cols.map Cellcounting.Model.Operations.SNat.get, C.small.map (fun (e : Cellcounting.Program.Entry) => (e.1, e.2.1, e.2.2.get)), C.nSmall, C.free.map (fun (e : Cellcounting.Program.Entry) => (e.1, e.2.1, e.2.2.get)), C.nFree, C.tree.map (fun (e : Cellcounting.Program.Entry) => (e.1, e.2.1, e.2.2.get)), C.nTree, C.order, C.roots, C.Mf.get, C.d.get, C.B.get, C.H.get, C.Aq.get, C.Hq.get, C.Bq.get) = (I.m, I.n, (List.range I.m).map (Cellcounting.Pseudocode.tRow I), (List.range I.n).map (Cellcounting.Pseudocode.tCol I), Cellcounting.Pseudocode.smallCells I ε δ, Cellcounting.Pseudocode.nSmall I ε δ, (Cellcounting.Pseudocode.forest I ε δ).free, Cellcounting.Pseudocode.nFree I ε δ, (Cellcounting.Pseudocode.forest I ε δ).tree, (Cellcounting.Pseudocode.forest I ε δ).tree.length, Cellcounting.Pseudocode.elimOrder I ε δ, Cellcounting.Pseudocode.roots I ε δ, Cellcounting.Pseudocode.Mf I ε δ, Cellcounting.Pseudocode.dParam I, Cellcounting.Pseudocode.BParam I ε δ, Cellcounting.Pseudocode.HParam I ε δ, (Cellcounting.Pseudocode.AParam I ε δ : ℚ), (Cellcounting.Pseudocode.HParam I ε δ : ℚ), (Cellcounting.Pseudocode.BParam I ε δ : ℚ))) (K : Cellcounting.Program.Chain) (hK : (K.p, K.pS.get, K.nsm, K.pairCell, K.cellFirst, K.smallB.map Cellcounting.Model.Operations.SNat.get, K.ξ.get, K.kAcc, K.kAccS.get) = (Cellcounting.Pseudocode.pSmall I ε δ, Cellcounting.Pseudocode.pSmall I ε δ, Cellcounting.Pseudocode.nSmall I ε δ, Cellcounting.Pseudocode.pairCells I ε δ, (List.range (Cellcounting.Pseudocode.nSmall I ε δ)).map (Cellcounting.Pseudocode.cellFirst I ε δ), (List.range (Cellcounting.Pseudocode.nSmall I ε δ)).map (Cellcounting.Pseudocode.smallB I ε δ), Cellcounting.Pseudocode.ξParam I ε δ, Cellcounting.Pseudocode.kAccParam I ε δ, Cellcounting.Pseudocode.kAccParam I ε δ)) (Ph : Cellcounting.Program.Phase) (hPh : (Ph.τ.get, Ph.Bret.get, Ph.BretN, Ph.Nav.get, Ph.NavN, Ph.Hn) = (Cellcounting.Pseudocode.τParam I ε δ, Cellcounting.Pseudocode.BretParam I ε δ, Cellcounting.Pseudocode.BretParam I ε δ, Cellcounting.Pseudocode.NavParam I ε δ, Cellcounting.Pseudocode.NavParam I ε δ, Cellcounting.Pseudocode.HParam I ε δ)) (j : ℕ) (ws : List (List (List Cellcounting.Model.Operations.SRat))) (prod : Cellcounting.Model.Operations.SRat) (ab : Bool) (hws : ab = false → ws.length = j + 1 ∧ ∀ t ∈ ws, t.length = Cellcounting.Pseudocode.pSmall I ε δ ∧ ∀ row ∈ t, row.length = Cellcounting.Pseudocode.pSmall I ε δ) (cur n T : ℕ) (hT : ∀ s : Finset ℕ, (Cellcounting.Program.phase C K (Arlib.Computation.Coins.ofFinset s) Ph j ⟨ws, prod, ab, cur⟩).val.cur + n ≤ T) : (Cellcounting.tapeHeads T).map (fun (s : Finset ℕ) => let r := (Cellcounting.Program.phase C K (Arlib.Computation.Coins.ofFinset s) Ph j ⟨ws, prod, ab, cur⟩).val; ((⟨fun (a i l : ℕ) => (((r.ws.getD a []).getD i []).getD l default).get, r.prod.get, r.aborted⟩ : Cellcounting.Pseudocode.RunState), ((s.filter (fun i => r.cur ≤ i)).image (fun i => i - r.cur)).filter (fun i => i < n))) = (Cellcounting.Pseudocode.phase I ε δ j ⟨fun (a i l : ℕ) => (((ws.getD a []).getD i []).getD l default).get, prod.get, ab⟩).bind (fun z => (Cellcounting.tapeHeads n).map (fun s' => (z, s'))) := by
@@ -1579,6 +1896,7 @@ end Cellcounting
 /-! ### Run record
 Newest first. History, not instruction — what this file claims is above.
 
+* r8 · proved · `observe_tape` from `step_tape`, `oracle_tape` (open siblings), `Analysis.kind_val`, `Analysis.profile_val`; local helpers `obs_*`
 * r7 · proved · `tighten_view` from new `Analysis.cellMin_val`/`cellMax_val` (proved); `params_view` outright; `feasible_val` proof moved to `Analysis/FeasibleValProof.lean`
 * r7 · proved · `orderStat_val` outright (insertion sort values are the sorted multiset)
 * r7 · proved · `feasible_val` from `Analysis.network_val` (proved), `Analysis.maxFlow_correct` and `Analysis.transport_flow_iff` (open children); Edmonds–Karp count isolated as `Analysis.edmondsKarp_bound` (cited, EK1972)
