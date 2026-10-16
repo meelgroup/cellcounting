@@ -9,11 +9,24 @@ The import list below is every module the project has. It grows as the
 development does so the model-closure report sees the declarations available at
 that boundary.
 -/
+import Cellcounting.Meta.ModelClosure
+import Cellcounting.Analysis.AccuracyProof
+import Cellcounting.Analysis.CostProof
+import Cellcounting.Analysis.InfeasibleProof
+import Cellcounting.Analysis.NonnegProof
+import Cellcounting.Interface.Encoding
+import Cellcounting.Interface.ProgramModel
+import Cellcounting.Interface.Pseudocode
+import Cellcounting.Model.Operations
 import Cellcounting.Model.Prelude
+import Cellcounting.Model.Prior
+import Cellcounting.Model.Program
+import Cellcounting.Model.Run
+import Cellcounting.Model.Theorem
+import Tex2Lean.RecoveryRequestsV1
 
 namespace Cellcounting.Meta
 
--- No headline recorded yet, so there is nothing to seed `#surplusIn` from.
--- The model gate records one; until then this file is here to be imported.
+#surplusIn Cellcounting.Model from Cellcounting.cellcounting_fpras
 
 end Cellcounting.Meta

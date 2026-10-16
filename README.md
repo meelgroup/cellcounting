@@ -14,6 +14,10 @@ Then follow the definitions into the other `Model/` files that are present:
 
 <!-- tex2lean:model-files:start -->
 - [`Cellcounting/Model/Prelude.lean`](Cellcounting/Model/Prelude.lean) defines the shared vocabulary.
+- [`Cellcounting/Model/Prior.lean`](Cellcounting/Model/Prior.lean) records assumptions or results taken from earlier work.
+- [`Cellcounting/Model/Operations.lean`](Cellcounting/Model/Operations.lean) names project-specific operations and their costs.
+- [`Cellcounting/Model/Program.lean`](Cellcounting/Model/Program.lean) describes the algorithm.
+- [`Cellcounting/Model/Run.lean`](Cellcounting/Model/Run.lean) describes how randomized runs are sampled.
 - [`Cellcounting/Model/Theorem.lean`](Cellcounting/Model/Theorem.lean) states the project's headline results.
 <!-- tex2lean:model-files:end -->
 

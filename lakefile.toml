@@ -26,3 +26,12 @@ name = "Cellcounting"
 
 [[lean_lib]]
 name = "CellcountingTest"
+# The root module and every module under CellcountingTest/, including one
+# module per planted `#programSeal` breach in CellcountingTest/CostSealBreaches/.
+# `CellcountingTest.+` alone matches only descendants, which leaves the root
+# module `CellcountingTest` unbuildable as a `+CellcountingTest` target.
+globs = ["CellcountingTest", "CellcountingTest.+"]
+
+[[lean_lib]]
+name = "Tex2Lean"
+roots = ["Tex2Lean.RecoveryRequestsV1"]

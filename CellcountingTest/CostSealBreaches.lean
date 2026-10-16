@@ -20,19 +20,25 @@ routes turns this file red.  This is the same discipline as
 `ArlibTest/Computation.lean` §3, applied to the checkers rather than to the
 compiler.
 
-Every cheat gets its **own namespace**.  The seal commands take the namespace to
-scan as an argument, so a cheat planted in `Breach.Exchange.Program` is invisible
-to the test that follows it — which keeps each expected message a single entry
-and keeps the tests independent of the order they run in.  It also checks
-something worth checking: that the commands are genuinely parameterized rather
-than hardcoded to the development they were written for.
+Every `#programSeal` cheat gets its **own module**, under
+`CellcountingTest/CostSealBreaches/`.  The seal accepts only the canonical
+namespace `Cellcounting.Program` — a seal that could be pointed at any namespace
+could be pointed at an empty one — so every planted cheat has to live there, and
+inside one file they would accumulate.  A module per cheat keeps each expected
+message a single entry and keeps the tests independent of the order they run in.
+This file checks the two guards on the argument itself: that any other
+namespace is refused, and that a canonical namespace with nothing in it is
+refused rather than reported clean.
 
 ## What is covered
 
 * §1 — the cheats the *compiler* rejects, so that a change making one of them
   compile is caught before either seal is reached.
-* §2 — `#programSeal`: the routes past the compiler, inside the algorithm —
-  including the one that only a *transitive* scan catches, which is the property
+* §2 — `#programSeal`: the guards on its argument here, and the routes past the
+  compiler, inside the algorithm, one module each under
+  `CellcountingTest/CostSealBreaches/` (`Exchange`, `Noncomputable`, `CasesOn`,
+  `HandPriced`, `Cost`, `Transitive`, `Measure`, `PeakAt`) — including the one
+  that only a *transitive* scan catches (`Transitive`), which is the property
   `reaches` exists for and the first test to run if it is ever touched.
 The positive direction is covered by the main build: `Model/Program.lean` runs
 the command over the real algorithm and it reports clean.
@@ -69,76 +75,7 @@ error: Invalid `⟨...⟩` notation: Constructor for `Arlib.Computation.Charged`
 #guard_msgs in
 example : Charged StdOp Cell Nat := ⟨0, 0, 1⟩
 
-/-! ## 2. `#programSeal` — the routes past the compiler -/
-
-/-! **Laundering a tally through a change of currency.**  `exchange` is
-computable and takes a `Charged` to a `Charged`, so nothing the compiler checks
-stands in the way; at a rate of zero it re-prices any computation at nothing. -/
-namespace Breach.Exchange.Program
-def cheat (p : Charged StdOp Cell Nat) : Charged StdOp Cell Nat :=
-  Charged.exchange (fun _ => (0 : CostVec StdOp)) p
-end Breach.Exchange.Program
-
-/--
-error: Seal breach in CellcountingTest.Breach.Exchange.Program: [(CellcountingTest.Breach.Exchange.Program.cheat, Arlib.Computation.Charged.exchange)].  A program that reads a dictionary without a charged operation, or that is marked noncomputable, can perform work it does not pay for.
--/
-#guard_msgs (whitespace := lax) in
-#programSeal CellcountingTest.Breach.Exchange.Program
-
-/-! **Silencing the compiler.**  Writing `noncomputable def` turns off the half
-of the seal §1 relies on.  Nothing else about this declaration is wrong, which is
-the point: the marker alone is the breach. -/
-namespace Breach.Noncomputable.Program
-noncomputable def cheat : Real := 0
-end Breach.Noncomputable.Program
-
-/--
-error: Seal breach in CellcountingTest.Breach.Noncomputable.Program: [(CellcountingTest.Breach.Noncomputable.Program.cheat, noncomputableProgram)].  A program that reads a dictionary without a charged operation, or that is marked noncomputable, can perform work it does not pay for.
--/
-#guard_msgs (whitespace := lax) in
-#programSeal CellcountingTest.Breach.Noncomputable.Program
-
-/-! **Projecting a dictionary's contents through the eliminator.**  `casesOn` is
-generated public even though the constructor is private, and it is compiled, so
-this is the one route the compiler genuinely leaves open. -/
-namespace Breach.CasesOn.Program
-def cheat (d : Roster Nat) : Nat :=
-  Roster.casesOn (motive := fun _ => Nat) d (fun elems _ => elems.length)
-end Breach.CasesOn.Program
-
-/--
-error: Seal breach in CellcountingTest.Breach.CasesOn.Program: [(CellcountingTest.Breach.CasesOn.Program.cheat, Arlib.Computation.Roster.casesOn)].  A program that reads a dictionary without a charged operation, or that is marked noncomputable, can perform work it does not pay for.
--/
-#guard_msgs (whitespace := lax) in
-#programSeal CellcountingTest.Breach.CasesOn.Program
-
-/-! **Pricing a line by hand.**  `Charged.op o a` is arlib's escape hatch — one
-operation of the currency, returning a value the algorithm computed for itself —
-and a program may not call it inline. Standard operations come from arlib;
-project-local operations come from `Model/Operations.lean`.
-
-The cheat below is exactly what the algorithm used to do, and it is the shape to
-watch for: the charge says "one coin" and the argument is an `O(level)` scan of a
-bare bit block, read at a level nobody paid for.  The seal cannot see that the
-argument is expensive — nothing can — so it forbids the escape hatch directly in
-`Program.lean`. The honest fix for a line that genuinely needs one is to expose
-the primitive in the operation model. -/
-namespace Breach.HandPriced.Program
--- The original wrote this against the development's own `BitBlock` and
--- `acceptsAt`, which is the shape the algorithm actually had. Here it is a
--- bare function on `Nat`, so that the breach library builds with nothing but
--- arlib and can be a default target from the first commit of a project. The
--- property under test is unchanged: the charge says one coin, and the seal
--- cannot see what the argument cost.
-def cheat (level : Nat) (bits : Nat → Bool) : Charged StdOp Cell Bool :=
-  Charged.op (StdOp.rand .accept) (bits level)
-end Breach.HandPriced.Program
-
-/--
-error: Seal breach in CellcountingTest.Breach.HandPriced.Program: [(CellcountingTest.Breach.HandPriced.Program.cheat, Arlib.Computation.Charged.op)].  A program that reads a dictionary without a charged operation, or that is marked noncomputable, can perform work it does not pay for.
--/
-#guard_msgs (whitespace := lax) in
-#programSeal CellcountingTest.Breach.HandPriced.Program
+/-! These two are compiler rejections too, of the sealed carriers' views. -/
 
 /-! **Reading the sampling level.**  The level is inside a `Sampler` and
 `Sampler.levelOf` is noncomputable, so the compiler rejects this before the seal
@@ -152,39 +89,6 @@ error: failed to compile definition, consider marking it as 'noncomputable' beca
 #guard_msgs in
 def cheat (s : Sampler) (n : Nat) : Nat := n * 2 ^ s.levelOf
 end Breach.PeekLevel.Program
-
-/-! **Observing a computation's own tally.**  `Charged.cost` is computable and
-"produces no value" — until `decide` is applied to it.  `Roster.cost_filterErase`
-equates a thinning pass's tally to `d.card`, so a program that may read `cost`
-has a free cardinality and therefore a free `cardEq`. -/
-namespace Breach.Cost.Program
-def cheat (p : Charged StdOp Cell Nat) : CostVec StdOp := p.cost
-end Breach.Cost.Program
-
-/--
-error: Seal breach in CellcountingTest.Breach.Cost.Program: [(CellcountingTest.Breach.Cost.Program.cheat, Arlib.Computation.Charged.cost)].  A program that reads a dictionary without a charged operation, or that is marked noncomputable, can perform work it does not pay for.
--/
-#guard_msgs (whitespace := lax) in
-#programSeal CellcountingTest.Breach.Cost.Program
-
-/-! **The same read, one hop away.**  `Charged.steps` is deliberately absent from
-`forbiddenInProgram`: it is `CostVec.steps C p.cost`, so a blacklist of *direct*
-mentions would miss it entirely.  This test is what makes the transitive walk a
-checked fact rather than an intention, and it is the one to run first if
-`reaches` is ever changed.
-
-Note which constant the message names — the intermediary the program actually
-called, not the forbidden constant behind it.  That is the name whose call site
-has to change. -/
-namespace Breach.Transitive.Program
-def cheat (p : Charged StdOp Cell Nat) : Nat := Charged.steps (Rate.unit StdOp) p
-end Breach.Transitive.Program
-
-/--
-error: Seal breach in CellcountingTest.Breach.Transitive.Program: [(CellcountingTest.Breach.Transitive.Program.cheat, Arlib.Computation.Charged.steps)].  A program that reads a dictionary without a charged operation, or that is marked noncomputable, can perform work it does not pay for.
--/
-#guard_msgs (whitespace := lax) in
-#programSeal CellcountingTest.Breach.Transitive.Program
 
 /-! **Reading what a computation holds.**  This one the compiler rejects on its
 own, and for a stronger reason than it rejects `Charged.cost`: a tally tells a
@@ -203,35 +107,32 @@ of `Roster.card`, and noncomputable for the same reason. -/
 error: failed to compile definition, consider marking it as 'noncomputable' because it depends on 'Residency.at'', which is 'noncomputable'
 -/
 #guard_msgs in
-def readResidency (r : Residency Cell) : Nat := r.at' Cell.cell
+def readResidency (r : Residency Cell) : Nat := r.at' Cell.roster
 
-/-! **Supplying your own measure.**  `opUpdate` is computable and takes the
-measure as an argument, so nothing the compiler checks objects to a measure that
-reports nothing — this is `Charged.exchange (fun _ => 0)` for space.  A program
-calls `Roster.insert`, which passes a measure private to `Roster`. -/
-namespace Breach.Measure.Program
-def cheat (d : Roster Nat) : Charged StdOp Cell (Roster Nat) :=
-  Charged.opUpdate (StdOp.roster .insert) (fun _ => Residency.ofFun fun _ => 0) id d
-end Breach.Measure.Program
+/-! ## 2. `#programSeal` — the guards on its argument
 
-/--
-error: Seal breach in CellcountingTest.Breach.Measure.Program: [(CellcountingTest.Breach.Measure.Program.cheat, Arlib.Computation.Charged.opUpdate), (CellcountingTest.Breach.Measure.Program.cheat, Arlib.Computation.Residency.ofFun)].  A program that reads a dictionary without a charged operation, or that is marked noncomputable, can perform work it does not pay for.
--/
-#guard_msgs (whitespace := lax) in
-#programSeal CellcountingTest.Breach.Measure.Program
+The breaches themselves are in `CellcountingTest/CostSealBreaches/`, one module
+each; see the module docstring. -/
 
-/-! **Reading the measured peak.**  `Charged.peakAt` is computable on purpose —
-`#guard` has to read it for the protocol's execution tests — so the compiler does
-not object, and the seal is what stops an algorithm from using it as a free size
-query.  Same standing as `Charged.cost`. -/
-namespace Breach.PeakAt.Program
-def cheat (p : Charged StdOp Cell Nat) : Int := p.peakAt Cell.cell
-end Breach.PeakAt.Program
+/-! **Pointing the seal somewhere else.**  A seal that took any namespace could
+be aimed at one the algorithm does not live in, and would then report clean. -/
+namespace Breach.Elsewhere.Program
+def cheat (p : Charged StdOp Cell Nat) : Charged StdOp Cell Nat :=
+  Charged.exchange (fun _ => (0 : CostVec StdOp)) p
+end Breach.Elsewhere.Program
 
 /--
-error: Seal breach in CellcountingTest.Breach.PeakAt.Program: [(CellcountingTest.Breach.PeakAt.Program.cheat, Arlib.Computation.Charged.peakAt)].  A program that reads a dictionary without a charged operation, or that is marked noncomputable, can perform work it does not pay for.
+error: Program seal must target the canonical namespace Cellcounting.Program, not CellcountingTest.Breach.Elsewhere.Program.
 -/
 #guard_msgs (whitespace := lax) in
-#programSeal CellcountingTest.Breach.PeakAt.Program
+#programSeal CellcountingTest.Breach.Elsewhere.Program
+
+/-! **A vacuous seal.**  Nothing in this module is in `Cellcounting.Program`, so
+the seal has nothing to check — and says so instead of reporting clean. -/
+/--
+error: Program seal checked zero declarations under Cellcounting.Program.  Put the executable declarations from Model/Program.lean in this exact namespace; a vacuous seal is not a seal.
+-/
+#guard_msgs (whitespace := lax) in
+#programSeal Cellcounting.Program
 
 end CellcountingTest
