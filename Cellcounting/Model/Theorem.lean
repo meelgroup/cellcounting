@@ -105,3 +105,10 @@ end Cellcounting
 #print axioms Cellcounting.cellcounting_fpras
 
 #surplusIn Cellcounting.Model from Cellcounting.cellcounting_fpras
+
+/-!
+HANDOFF NOTES
+Review observations only; these notes do not change theorem status.
+Proof trust: 6 proof-trust issue(s), starting with lean/Cellcounting/Analysis/ObserveAccurate.lean:389; lean/Cellcounting/Interface/ProgramModel.lean:2967
+Randomness semantics: The headline's distribution is the map of a fixed-length fair-bit seed through a deterministic program, not a PMF built from the algorithm's own pure/bind/sample control flow. The step from 'each draw uses fresh independent unbiased bits' to this map is asserted in a docstring, not composed or proved where a reviewer reads.
+-/

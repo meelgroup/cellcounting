@@ -1,0 +1,30 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/mathlib-initiative/formalization.yaml/main/schema/formalization.schema.json
+# Self-reported metadata. Tex2Lean preserves this file on later runs.
+# DRAFT: fill required authors, license, and source details before publication.
+"version": "v0.4"
+"project":
+  "name": "Cellcounting"
+  "authors": []
+  "license": ""
+"sources":
+  -
+    "title": ""
+"automation":
+  "methods":
+    -
+      "method": "other"
+      "framework": "Tex2Lean"
+      "tool_setup": "Metadata prepared by Tex2Lean; proof-development methods must be assessed by the maintainer."
+"review":
+  "status": "unchecked"
+"status":
+  "main_results":
+    -
+      "declaration": "Cellcounting.cellcounting_fpras"
+      "file": "lean/Cellcounting/Model/Theorem.lean"
+"alignment":
+  "namespace": "Cellcounting"
+  "statements":
+    -
+      "lean": "Cellcounting.cellcounting_fpras"
+      "module": "lean/Cellcounting/Model/Theorem.lean"
