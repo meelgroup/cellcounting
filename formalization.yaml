@@ -4,11 +4,18 @@
 "version": "v0.4"
 "project":
   "name": "Cellcounting"
-  "authors": []
+  "authors":
+    - "Tex2Lean (run by Kuldeep Meel)"
   "license": ""
 "sources":
   -
-    "title": ""
+    "title": "An FPRAS for Cell-Bounded Contingency Tables"
+    "authors":
+      - "OpenAI"
+    "type": "article"
+    "location": "Theorem 1.1 (thm:main)"
+    "relationship": "formalizes"
+    "note": "Unpublished manuscript dated September 24, 2026."
 "automation":
   "methods":
     -
